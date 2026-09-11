@@ -1132,9 +1132,36 @@ def cubo_valido(nombre, tax, permitir_nuevos=True):
 PROVEEDORES = {
     'Groq': ('https://api.groq.com/openai/v1', 'llama-3.3-70b-versatile'),
     'OpenAI': ('https://api.openai.com/v1', 'gpt-4.1-mini'),
+    'OpenAI (nano)': ('https://api.openai.com/v1', 'gpt-4.1-nano-2025-04-14'),
     'DeepSeek': ('https://api.deepseek.com/v1', 'deepseek-chat'),
     'Otro (compatible OpenAI)': ('', ''),
 }
+CLAVES_SECRETS = ('llm_api_key', 'api_key', 'openai_api_key', 'OPENAI_API_KEY', 'groq_api_key',
+                  'GROQ_API_KEY')
+
+
+def leer_secrets():
+    """Lee proveedor/modelo/base_url/api_key de st.secrets (Streamlit Cloud o secrets.toml local).
+
+    Acepta las claves sueltas o dentro de una sección [general]. Si no hay nada, devuelve {} y la
+    app funciona igual escribiendo la key en la barra lateral.
+    """
+    cfg = {}
+    try:
+        s = dict(st.secrets)
+    except Exception:
+        return cfg
+    secciones = [s] + [v for v in s.values() if isinstance(v, dict)]
+    for sec in secciones:
+        for k in ('proveedor', 'base_url', 'modelo', 'criterio'):
+            if k in sec and not cfg.get(k):
+                cfg[k] = str(sec[k])
+        if not cfg.get('api_key'):
+            for k in CLAVES_SECRETS:
+                if k in sec and sec[k]:
+                    cfg['api_key'] = str(sec[k])
+                    break
+    return cfg
 
 EJEMPLOS = [
  {
@@ -1644,6 +1671,7 @@ def main():
                'con Tono, Tema y Sub-tema por mención. Los grupos de notas iguales comparten etiqueta.')
 
     with st.sidebar:
+        _sec = leer_secrets()
         st.header('1. Cliente')
         entidad = st.text_input('Entidad / marca / persona', '')
         voceros = st.text_input('Vocero(s), separados por coma', '')
@@ -1651,15 +1679,21 @@ def main():
                              '', height=90,
                              help='Ej: Fenavi, Federación Nacional de Avicultores, el gremio avicultor, '
                                   'la avicultura colombiana')
-        criterio = st.radio('Criterio del tono', list(CRITERIOS_TONO.keys()), index=0)
+        criterio = st.radio('Criterio del tono', list(CRITERIOS_TONO.keys()),
+                            index=list(CRITERIOS_TONO.keys()).index(_sec['criterio'])
+                            if _sec.get('criterio') in CRITERIOS_TONO else 0)
 
         st.header('2. Modelo')
-        proveedor = st.selectbox('Proveedor', list(PROVEEDORES.keys()), index=0)
+        _prov = _sec.get('proveedor') if _sec.get('proveedor') in PROVEEDORES else list(PROVEEDORES)[0]
+        proveedor = st.selectbox('Proveedor', list(PROVEEDORES.keys()), index=list(PROVEEDORES).index(_prov))
         base_def, modelo_def = PROVEEDORES[proveedor]
-        base_url = st.text_input('base_url', base_def)
-        modelo = st.text_input('Modelo', modelo_def)
-        api_key = st.text_input('API key', value=st.session_state.get('api_key', ''), type='password')
-        st.session_state['api_key'] = api_key
+        base_url = st.text_input('base_url', _sec.get('base_url') or base_def)
+        modelo = st.text_input('Modelo', _sec.get('modelo') or modelo_def)
+        api_key = st.text_input('API key', value=_sec.get('api_key', ''), type='password',
+                                help='Si la guardas en los Secrets de Streamlit (llm_api_key), '
+                                     'aparece aquí ya cargada.')
+        if _sec.get('api_key'):
+            st.caption('Usando la API key de los Secrets.')
 
         st.header('3. Agrupación y lotes')
         umbral_titulo = st.slider('Umbral de similitud de titulares (%)', 75, 100,
