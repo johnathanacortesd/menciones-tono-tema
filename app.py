@@ -49,6 +49,9 @@ Requisitos: streamlit, openpyxl, pandas, requests, rapidfuzz, numpy.
 """
 
 import collections
+from collections.abc import Mapping
+import hashlib
+import hmac
 import io
 import json
 import re
@@ -1138,6 +1141,46 @@ PROVEEDORES = {
 }
 CLAVES_SECRETS = ('llm_api_key', 'api_key', 'openai_api_key', 'OPENAI_API_KEY', 'groq_api_key',
                   'GROQ_API_KEY')
+CLAVES_PASSWORD = ('app_password', 'APP_PASSWORD', 'password', 'PASSWORD')
+
+
+def _secciones_secrets(secrets_obj):
+    """Devuelve [raíz] + cada sección [nombre] de los secrets, para aceptar las claves sueltas.
+
+    Ojo: las secciones de st.secrets NO son `dict` sino un Mapping de Streamlit
+    (AttrDict); con isinstance(v, dict) se ignoraban y ni la contraseña ni la api key
+    del bloque [general] se leían.
+    """
+    try:
+        s = dict(secrets_obj)
+    except Exception:
+        return []
+    return [s] + [v for v in s.values() if isinstance(v, Mapping)]
+
+
+def password_esperada(secrets_obj):
+    """Contraseña configurada en los secrets, o None si no hay.
+
+    Acepta `app_password` (como las otras apps del usuario) o `APP_PASSWORD`, en la raíz o dentro
+    de una sección [general]. Admite texto plano o un hash con el prefijo `sha256:`.
+    """
+    for sec in _secciones_secrets(secrets_obj):
+        for k in CLAVES_PASSWORD:
+            v = sec.get(k)
+            if v:
+                return str(v)
+    return None
+
+
+def coincide_password(ingresada, esperada):
+    """True si la contraseña ingresada corresponde. Soporta `sha256:...` en la configurada."""
+    if not esperada:
+        return False
+    ing = str(ingresada or '')
+    if esperada.startswith('sha256:'):
+        return hmac.compare_digest(hashlib.sha256(ing.encode('utf-8')).hexdigest(),
+                                   esperada.split(':', 1)[1].strip().lower())
+    return hmac.compare_digest(ing, esperada)
 
 
 def leer_secrets():
@@ -1151,8 +1194,7 @@ def leer_secrets():
         s = dict(st.secrets)
     except Exception:
         return cfg
-    secciones = [s] + [v for v in s.values() if isinstance(v, dict)]
-    for sec in secciones:
+    for sec in _secciones_secrets(s):
         for k in ('proveedor', 'base_url', 'modelo', 'criterio'):
             if k in sec and not cfg.get(k):
                 cfg[k] = str(sec[k])
@@ -1255,25 +1297,35 @@ CRITERIOS_TONO = {
     ),
     'Favorabilidad del sector (para gremios)': (
         "El tono mide como queda parado el sector o la marca en la nota, aunque la entidad no sea el actor.\n"
-        "- Positivo: la nota favorece al sector o a sus productos (promocion de consumo, crecimiento,\n"
-        "  mercados nuevos, congresos, campañas, reconocimientos).\n"
-        "- Negativo: la nota daña al sector (criticas, denuncias ambientales o laborales a empresas del\n"
-        "  sector, alzas de precios, escandalos, robos o crisis que afectan su imagen).\n"
-        "- Neutro: contexto sin efecto sobre la imagen del sector (politica nacional, otros gremios,\n"
-        "  economia del pais sin relacion con el sector).\n"
+        "- Positivo: la nota favorece al sector o a sus productos: promocion de consumo, crecimiento,\n"
+        "  mercados nuevos o exportaciones, congresos y eventos del gremio, campañas, reconocimientos, y\n"
+        "  tambien los anuncios de planes o medidas oficiales que benefician al sector (aunque el actor\n"
+        "  sea un ministerio o el Gobierno).\n"
+        "- Negativo: la nota daña al sector por un hecho ATRIBUIBLE a el o por una critica dirigida: una\n"
+        "  denuncia o sancion contra el gremio, su vocero o una empresa del sector, contaminacion, malas\n"
+        "  practicas, incumplimientos o escandalos que afectan su imagen.\n"
+        "- Neutro: hechos adversos SIN responsable del sector ni institucional (robos, hurtos, delitos,\n"
+        "  accidentes, incendios, inundaciones, clima), datos economicos, precios, y politica nacional sin\n"
+        "  relacion con el sector. Un robo a una granja NO es Negativo: es una victima, no una falta.\n"
         "Ante duda, elige Neutro."
     ),
 }
 
 REGLAS_SUBTEMA = (
-    "El Sub-tema resume EL HECHO en una frase nominal de 3 a 7 palabras, coherente y especifica.\n"
+    "El Sub-tema resume EL HECHO de esa nota, no la categoria a la que pertenece, en una frase nominal\n"
+    "de 3 a 5 palabras (maximo 7), coherente y especifica.\n"
     "- No empieces con verbo conjugado (nada de 'Entregan', 'Anuncian', 'Avanza', 'Denuncian').\n"
     "  Si empiezas con un sustantivo de accion esta bien: 'Entrega del parque', 'Anuncio de inversiones'.\n"
     "- No termines en preposicion o nexo.\n"
     "- No uses dos puntos, punto y coma, barra vertical, comillas ni guiones largos.\n"
     "- No copies el titular ni recortes una frase del texto: sintetiza el hecho.\n"
     "- Prohibido rotulos vacios: 'noticias generales', 'gestion institucional', 'varios', 'informacion'.\n"
-    "- Nunca repitas el nombre de la entidad ni el del medio.\n"
+    "- No repitas el nombre de la entidad, del gremio ni del medio, ni uses etiquetas de categoria.\n"
+    "  MAL: 'Exportaciones y mercados internacionales de Fenavi' (es un tema, no un hecho),\n"
+    "       'Transformacion digital en el sector avicola' (generico).\n"
+    "  BIEN: 'Exportacion de pollo a Estados Unidos', 'Planes de IA en el congreso avicola'.\n"
+    "- Incluye el actor o el lugar cuando son lo que distingue el hecho: no 'Visita internacional'\n"
+    "  sino 'Visita de la embajadora de Australia'.\n"
     "- Si el hecho ya aparece en la lista CANDIDATOS, reutiliza EXACTAMENTE ese texto (misma mayuscula y\n"
     "  mismas palabras). Nunca crees una variante nueva de un hecho que ya tiene sub-tema."
 )
@@ -1665,7 +1717,54 @@ def extraer(archivo, nombre_hoja, col_tit, col_txt, col_id, cols_extra):
 # ============================================================================
 # 8. INTERFAZ
 # ============================================================================
+def exigir_password():
+    """Puerta de entrada. Devuelve True si se puede ver la app.
+
+    Si no hay contraseña en los secrets, deja pasar y avisa (modo local). Si hay, no se dibuja
+    nada más de la app hasta que el usuario acierte.
+    """
+    esperada = password_esperada(dict(st.secrets)) if _hay_secrets() else None
+    if not esperada:
+        return True
+    if st.session_state.get('_auth_ok'):
+        return True
+    st.title('📰 Tono, Tema y Sub-tema de menciones')
+    st.caption('Acceso restringido. Ingresa la contraseña para usar la aplicación.')
+    with st.form('_login'):
+        pw = st.text_input('Contraseña', type='password', key='_pw_input')
+        entrar = st.form_submit_button('Entrar', type='primary')
+    if entrar:
+        if coincide_password(pw, esperada):
+            st.session_state['_auth_ok'] = True
+            st.session_state['_intentos'] = 0
+            st.rerun()
+        else:
+            st.session_state['_intentos'] = st.session_state.get('_intentos', 0) + 1
+            st.error('Contraseña incorrecta.')
+            time.sleep(min(1.0 + 0.5 * st.session_state['_intentos'], 3.0))
+    st.stop()
+
+
+def _hay_secrets():
+    try:
+        _ = dict(st.secrets)
+        return True
+    except Exception:
+        return False
+
+
+def aviso_sin_password():
+    """Aviso visible cuando la app está publicada y no tiene contraseña configurada."""
+    if not _hay_secrets():
+        return
+    if not password_esperada(dict(st.secrets)):
+        st.warning('⚠️ Esta app no tiene contraseña configurada. Agrega `app_password` en los '
+                   'Secrets (o en .streamlit/secrets.toml) para restringir el acceso.')
+
+
 def main():
+    exigir_password()
+    aviso_sin_password()
     st.title('📰 Tono, Tema y Sub-tema de menciones')
     st.caption('Sube el export de monitoreo, indica la marca y sus voceros, y descarga el XLSX '
                'con Tono, Tema y Sub-tema por mención. Los grupos de notas iguales comparten etiqueta.')
@@ -1714,6 +1813,12 @@ def main():
         tax_json = st.text_area('Editar la lista de Temas (JSON)',
                                 json.dumps(TAX_GOBIERNO if tax_nombre.startswith('Gobierno') else TAX_GREMIO,
                                            ensure_ascii=False, indent=1), height=150)
+        if st.session_state.get('_auth_ok'):
+            st.divider()
+            if st.button('Cerrar sesión'):
+                st.session_state['_auth_ok'] = False
+                st.session_state.pop('res', None)
+                st.rerun()
 
     archivo = st.file_uploader('XLSX de menciones', type=['xlsx', 'xlsm'])
     if not archivo:

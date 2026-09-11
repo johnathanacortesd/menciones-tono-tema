@@ -198,9 +198,23 @@ def main():
     check('sub-temas de 3 a 7 palabras', all(3 <= len(str(r[i_sub]).split()) <= 7 for r in D),
           str([r[i_sub] for r in D if not 3 <= len(str(r[i_sub]).split()) <= 7]))
 
+    print('\n6. contraseña de acceso')
+    check('lee app_password de [general]',
+          app.password_esperada({'general': {'app_password': 'clave-1'}}) == 'clave-1')
+    check('lee APP_PASSWORD de la raíz',
+          app.password_esperada({'APP_PASSWORD': 'clave-2'}) == 'clave-2')
+    check('sin contraseña configurada devuelve None', app.password_esperada({}) is None)
+    check('acepta la contraseña correcta y rechaza la incorrecta',
+          app.coincide_password('clave-1', 'clave-1') is True
+          and app.coincide_password('otra', 'clave-1') is False
+          and app.coincide_password('', 'clave-1') is False)
+    import hashlib
+    h = 'sha256:' + hashlib.sha256('clave-3'.encode()).hexdigest()
+    check('acepta contraseña guardada como hash sha256',
+          app.coincide_password('clave-3', h) is True and app.coincide_password('clave-4', h) is False)
+
     print('\n' + ('TODO OK' if not FALLOS else 'FALLARON: %s' % FALLOS))
     return 1 if FALLOS else 0
-
 
 if __name__ == '__main__':
     sys.exit(main())

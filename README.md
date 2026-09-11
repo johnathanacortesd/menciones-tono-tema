@@ -34,6 +34,47 @@ La precisión no viene del prompt: viene de cinco piezas deterministas alrededor
    cubo nuevo **específico**; la app rechaza `Otros`, `Información general`, `Actividad institucional`
    y cualquier rótulo vacío, y bloquea la descarga mientras quede un grupo sin cubo.
 
+## Contraseña de acceso
+
+La app pide una contraseña antes de mostrar nada si existe `app_password` en los secrets (en la
+raíz o dentro de `[general]`). También acepta `APP_PASSWORD`. Sirve texto plano o un hash:
+
+```toml
+[general]
+app_password = "tu-clave"                 # o
+app_password = "sha256:9f86d081884c7d65..." # hash sha256 de "tu-clave"
+```
+
+Para generar el hash: `python -c "import hashlib;print(hashlib.sha256('TU_CLAVE'.encode()).hexdigest())"`
+
+Sin contraseña configurada la app funciona igual (modo local) pero muestra un aviso; si la publicas,
+configúrala. Verás un botón **Cerrar sesión** en la barra lateral, y cada intento fallido tiene una
+espera creciente.
+
+Límite honesto: esto es una puerta de entrada, no seguridad real. Protege de un vistazo casual y de
+que alguien use tu cuota de API, pero quien tenga la URL ve la pantalla de contraseña y podría
+intentar fuerza bruta; Streamlit Cloud no expone el repo ni los secrets, y para un control fuerte
+haría falta un proveedor de identidad (OAuth).
+
+## Criterio del tono: elige bien (es lo que más mueve el resultado)
+
+Medido contra un corpus real de 142 menciones (gremio avícola, 20 grupos comparados):
+
+| Criterio | gpt-4.1-mini | gpt-4.1-nano |
+|---|---|---|
+| Aspectual estricto | 50 % de coincidencia | 50 % |
+| **Favorabilidad del sector** | **100 %** | 60 % |
+
+Si el cliente es una **gobernación, alcaldía o entidad pública**, usa *Aspectual estricto* (el tono
+juzga lo que la entidad hace o recibe). Si es un **gremio, federación, cámara o empresa de un sector**,
+usa *Favorabilidad del sector*: ahí lo que importa es cómo queda parado el sector en la nota, y un
+anuncio del Gobierno que beneficia al sector cuenta como Positivo.
+
+Modelo: **gpt-4.1-mini** es el recomendado. Con el criterio correcto llegó a 100 % de coincidencia y
+cero etiquetas inválidas; `gpt-4.1-nano` se quedó en 60 % y dejó dos sub-temas de 8 palabras que no
+pudo corregir. La diferencia de costo es irrelevante en este volumen: 142 menciones ≈ 99 grupos ≈ 7
+llamadas, centavos en cualquiera de los dos.
+
 ## Uso local
 
 ```bash
