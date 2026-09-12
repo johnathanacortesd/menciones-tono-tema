@@ -1525,15 +1525,48 @@ def reparar_lote(cfg, fallos):
     return out
 
 
-def etiquetar_todo(cfg, grupos, progreso=None, tam_lote=15, max_reparaciones=2):
-    """Etiqueta todos los grupos: lotes -> validacion -> reparacion. Devuelve etiquetas y bitacora."""
+def _voto_mayoria(pasadas, ids_lote):
+    """Combina varias pasadas: gana el tono mas votado (empate -> Neutro) y el sub-tema mas repetido."""
+    salida = {}
+    for gid in ids_lote:
+        tonos = [v[gid]['tono'] for v in pasadas if gid in v and v[gid].get('tono')]
+        subs = [v[gid]['sub_tema'] for v in pasadas if gid in v and v[gid].get('sub_tema')]
+        if not tonos and not subs:
+            continue
+        top = collections.Counter(tonos).most_common()
+        if not top:
+            tono = 'Neutro'
+        elif len(top) > 1 and top[0][1] == top[1][1]:
+            tono = 'Neutro' if 'Neutro' in (top[0][0], top[1][0]) else top[0][0]
+        else:
+            tono = top[0][0]
+        cs = collections.Counter(nz(x) for x in subs)
+        if not cs:
+            sub = ''
+        else:
+            rep = max(cs.values())
+            sub = min([x for x in subs if cs[nz(x)] == rep], key=len)
+        salida[gid] = {'sub_tema': sub, 'tono': tono}
+    return salida
+
+
+def etiquetar_todo(cfg, grupos, progreso=None, tam_lote=15, max_reparaciones=2, votos=2):
+    """Etiqueta todos los grupos: lotes -> votacion -> validacion -> reparacion."""
     etiquetas, bitacora = {}, []
     candidatos = []
     total = len(grupos)
     hechos = 0
+    votos = max(1, int(votos or 1))
     for i in range(0, total, tam_lote):
         lote = grupos[i:i + tam_lote]
-        labels = etiquetar_lote(cfg, lote, candidatos)
+        pasadas = []
+        for _v in range(votos):
+            try:
+                pasadas.append(etiquetar_lote(cfg, lote, candidatos))
+            except Exception:
+                pasadas.append({})
+        labels = _voto_mayoria(pasadas, [g['grupo'] for g in lote]) if votos > 1 \
+            else (pasadas[0] if pasadas else {})
         for g in lote:
             etiquetas[g['grupo']] = labels.get(g['grupo'], {'sub_tema': '', 'tono': ''})
         # validacion + reparacion
@@ -1875,6 +1908,9 @@ def main():
                                        'muchos medios. Súbelo para separar notas parecidas pero distintas.')
         umbral_cuerpo = st.slider('Umbral de similitud de cuerpos (%)', 70, 100,
                                   UMBRAL_CUERPO_POR_DEFECTO, 1)
+        votos = st.slider('Verificaciones del tono por grupo', 1, 3, 2, 1,
+                          help='Cada grupo se etiqueta N veces y gana la mayoría; un empate cae a '
+                               'Neutro. Con 2 se reducen los vaivenes del modelo.')
         tam_lote = st.slider('Grupos por llamada al modelo', 5, 30, 10, 1,
                              help='Con modelos pequeños (gpt-4.1-nano) 10 funciona mejor; con mini se '
                                   'puede subir a 15.')
@@ -1970,7 +2006,12 @@ def main():
             def prog(h, t, msg):
                 barra.progress(0.1 + 0.7 * h / max(1, t), msg)
             etiquetas, bitacora = etiquetar_todo(cfg, grupos, prog, tam_lote=tam_lote,
-                                                 max_reparaciones=max_rep)
+                                                 max_reparaciones=max_rep, votos=votos)
+            corregidos = aplicar_guarda_tono(grupos, etiquetas, cfg['entidad'], cfg['alias'])
+            st.session_state['corregidos_guarda'] = corregidos
+            if corregidos:
+                st.caption('Guarda del tono: %d Negativos sin señalamiento dirigido pasaron a Neutro.'
+                           % len(corregidos))
             barra.progress(0.85, 'Asignando Temas...')
             temas, pendientes, origen = asignar_temas(cfg, grupos, etiquetas, tax, permitir_nuevos)
         except Exception as e:
@@ -2073,3 +2114,52 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# ============================================================================
+# Guarda determinista del tono: "el tema negativo no es tono negativo"
+# ============================================================================
+CRITICA_PAT = re.compile(
+    r'(denunci|cuestion|sancion|critic|rechaz|exig|acusa|se[nñ]al|demand|investiga|irregular|'
+    r'sobrecosto|corrup|incumpl|multa|reclam|responsabiliz|se le atribuye)', re.I)
+VICTIMA_PAT = re.compile(
+    r'(\brobo\b|roban|rob[oa]ron|hurto|atrac|asalt|accidente|\bmuert|fallec|herid|inundaci|'
+    r'deslizamiento|incendio|sequ[ií]a|apag[oó]n|el ni[nñ]o|desempleo|suicid|\bprecio|alza|'
+    r'aumento|protesta|delincuencia|homicid|violencia|aguas residuales en)', re.I)
+BLANCO_EMPRESA = re.compile(r'(una empresa|una compa[nñ][ií]a|una firma|una industria|un frigor[ií]fico|'
+                            r'una planta|un matadero|una av[ií]cola|la empresa|la compa[nñ][ií]a)', re.I)
+NOMBRE_PROPIO = re.compile(r'(?<![.!?]\s)(?<![.!?])\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}')
+
+
+def _tema_negativo(texto):
+    return bool(VICTIMA_PAT.search(ctrl(texto)))
+
+
+def _critica_dirigida(texto, brand, aliases):
+    t = ctrl(texto)
+    if not t:
+        return False
+    nt = nz(t)
+    marcas = [m for m in [brand] + list(aliases or []) if m and len(str(m)) > 3]
+    for m in CRITICA_PAT.finditer(t):
+        cerca = nt[max(0, m.start() - 60): m.end() + 90]
+        if any(nz(x) and nz(x) in cerca for x in marcas):
+            return True
+        ventana = t[m.end(): m.end() + 35]
+        if BLANCO_EMPRESA.search(ventana) or NOMBRE_PROPIO.search(ventana):
+            return True
+    return False
+
+
+def aplicar_guarda_tono(grupos, etiquetas, brand, aliases):
+    """Baja a Neutro los Negativos que solo describen un hecho tragico, sin señalamiento dirigido."""
+    corregidos = []
+    for g in grupos:
+        e = etiquetas.get(g['grupo'])
+        if not e or e.get('tono') != 'Negativo':
+            continue
+        texto = '%s %s' % (g['titulo'], g.get('texto', ''))
+        if _tema_negativo(texto) and not _critica_dirigida(texto, brand, aliases):
+            e['tono'] = 'Neutro'
+            corregidos.append(g['grupo'])
+    return corregidos
+

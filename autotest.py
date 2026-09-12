@@ -214,6 +214,30 @@ def main():
     check('acepta contraseña guardada como hash sha256',
           app.coincide_password('clave-3', h) is True and app.coincide_password('clave-4', h) is False)
 
+    print('\n8. guarda del tono y votación')
+    casos = [
+        ('Roban 180.000 huevos en una granja y la denuncia oportuna de la comunidad permitio '
+         'recuperar los camiones', 'Neutro'),
+        ('El Nino enciende las alarmas: crece el riesgo para el agua y la energia', 'Neutro'),
+        ('Un fallo del Consejo de Estado le pone limites al derecho a la protesta', 'Neutro'),
+        ('Campesinos denuncian que una empresa vierte aguas residuales en una quebrada', 'Negativo'),
+        ('Vecinos denuncian que Mac Pollo contamina la cienaga con vertimientos', 'Negativo'),
+    ]
+    bien = 0
+    for texto, esperado in casos:
+        grupos_g = [{'grupo': 1, 'titulo': texto, 'texto': texto}]
+        et_g = {1: {'tono': 'Negativo', 'sub_tema': 'x'}}
+        app.aplicar_guarda_tono(grupos_g, et_g, 'Universidad Simon Bolivar', ['la universidad'])
+        bien += et_g[1]['tono'] == esperado
+    check('la guarda baja los Negativos sin señalamiento y respeta la crítica dirigida',
+          bien == len(casos), '%d/%d' % (bien, len(casos)))
+    votos = [{1: {'sub_tema': 'Robo en granja', 'tono': 'Negativo'}},
+             {1: {'sub_tema': 'Robo en granja', 'tono': 'Neutro'}},
+             {1: {'sub_tema': 'Robo en la granja', 'tono': 'Positivo'}}]
+    comb = app._voto_mayoria(votos, [1])
+    check('la votación empata en Neutro y elige el sub-tema más repetido',
+          comb[1]['tono'] == 'Neutro' and comb[1]['sub_tema'] == 'Robo en granja', str(comb))
+
     print('\n7. reglas que no pueden desaparecer')
     for nombre, txt in app.CRITERIOS_TONO.items():
         check('el criterio "%s" aclara que el tema no decide el tono' % nombre[:22],
