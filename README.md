@@ -58,22 +58,40 @@ haría falta un proveedor de identidad (OAuth).
 
 ## Criterio del tono: elige bien (es lo que más mueve el resultado)
 
-Medido contra un corpus real de 142 menciones (gremio avícola, 20 grupos comparados):
+Medido contra un corpus real de 142 menciones de un gremio (20 grupos comparados uno a uno con
+etiquetas humanas):
 
 | Criterio | gpt-4.1-mini | gpt-4.1-nano |
 |---|---|---|
 | Aspectual estricto | 50 % de coincidencia | 50 % |
-| **Favorabilidad del sector** | **100 %** | 60 % |
+| **Favorabilidad del sector** | 90-100 % | **95 %** (0 etiquetas inválidas) |
 
 Si el cliente es una **gobernación, alcaldía o entidad pública**, usa *Aspectual estricto* (el tono
 juzga lo que la entidad hace o recibe). Si es un **gremio, federación, cámara o empresa de un sector**,
-usa *Favorabilidad del sector*: ahí lo que importa es cómo queda parado el sector en la nota, y un
-anuncio del Gobierno que beneficia al sector cuenta como Positivo.
+usa *Favorabilidad del sector*: ahí lo que importa es cómo queda parado el sector en la nota, y una
+nota del sector sobre tecnología, congreso o planes cuenta como Positivo aunque no haya un logro
+cerrado.
 
-Modelo: **gpt-4.1-mini** es el recomendado. Con el criterio correcto llegó a 100 % de coincidencia y
-cero etiquetas inválidas; `gpt-4.1-nano` se quedó en 60 % y dejó dos sub-temas de 8 palabras que no
-pudo corregir. La diferencia de costo es irrelevante en este volumen: 142 menciones ≈ 99 grupos ≈ 7
-llamadas, centavos en cualquiera de los dos.
+Cualquiera de los dos modelos sirve con el criterio correcto; la diferencia entre mini y nano en esta
+muestra está dentro del ruido (1 caso de 20), así que **nano es perfectamente usable** y cuesta una
+fracción. Con `gpt-4.1-nano` usa **10 grupos por llamada** (no 15): el prompt es largo y el modelo
+pequeño se distrae; el control está en la barra lateral.
+
+Los sub-temas del modelo están redactados distinto a los de una persona ("Congreso nacional de Fenavi"
+vs "XXII Congreso de Fenavi en Cali") aunque describan el mismo hecho: para comparar entre meses, la
+columna estable es **Tema** (cubo asignado por reglas), no el texto del sub-tema.
+
+## Versión de Python
+
+Usa **Python 3.12**, en local y en Streamlit Cloud.
+
+- Streamlit Community Cloud trae 3.12 por defecto y permite elegir la versión en *Advanced settings*.
+  No respeta `runtime.txt` ni `.python-version`: hay que escogerla en el desplegable.
+- En agosto de 2026 hubo despliegues rotos cuando la plataforma forzó 3.14 con muchas librerías; la
+  salida recomendada fue volver a desplegar seleccionando 3.12.
+- Las dependencias con extensión nativa (numpy, pandas, rapidfuzz) publican ruedas para 3.12 y para
+  3.14, y las demás son Python puro, así que 3.14 funciona; simplemente no aporta nada aquí y añade
+  riesgo de despliegue. 3.11 también está probado (es la versión con la que se validó esta app).
 
 ## Uso local
 

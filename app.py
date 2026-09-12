@@ -1283,6 +1283,24 @@ EJEMPLOS = [
  }
 ]
 
+EJEMPLOS_SECTOR = [
+    {'titulo': 'FENAVI realizará su congreso de 2028 en Barranquilla',
+     'sub_tema': 'Congreso avícola 2028 en Barranquilla', 'tono': 'Positivo'},
+    {'titulo': 'Gobierno impulsa plan para convertir a Colombia en potencia exportadora de pollo y huevo',
+     'sub_tema': 'Plan para exportar pollo y huevo', 'tono': 'Positivo'},
+    {'titulo': 'Fenavitón: el gremio avícola busca ayudar a familias damnificadas por el terremoto',
+     'sub_tema': 'Ayudas de Fenavi por el terremoto', 'tono': 'Positivo'},
+    {'titulo': 'Expertos analizan el impacto de la inteligencia artificial en la industria durante el congreso',
+     'sub_tema': 'Paneles de IA en el congreso avícola', 'tono': 'Positivo'},
+    {'titulo': '180.000 huevos y 15 hombres armados: el millonario robo a una granja avícola del Atlántico',
+     'sub_tema': 'Robo a granja avícola en Sabanalarga', 'tono': 'Neutro'},
+    {'titulo': 'El precio del pollo asado sigue subiendo y estas son las causas',
+     'sub_tema': 'Aumento del precio del pollo asado', 'tono': 'Neutro'},
+    {'titulo': 'Campesinos denuncian que una empresa vierte aguas residuales en una quebrada',
+     'sub_tema': 'Denuncia por vertimientos de Mac Pollo', 'tono': 'Negativo'},
+    {'titulo': 'Alcalde de Cartagena y gobernadores evalúan el proyecto del Canal del Dique',
+     'sub_tema': 'Revisión del Canal del Dique', 'tono': 'Neutro'},
+]
 CRITERIOS_TONO = {
     'Aspectual estricto (recomendado)': (
         "El tono mide SOLO lo que se dice de la entidad, de su vocero o de sus funcionarios.\n"
@@ -1296,38 +1314,40 @@ CRITERIOS_TONO = {
         "Ante duda entre Positivo y Neutro, o entre Negativo y Neutro, elige Neutro."
     ),
     'Favorabilidad del sector (para gremios)': (
-        "El tono mide como queda parado el sector o la marca en la nota, aunque la entidad no sea el actor.\n"
-        "- Positivo: la nota favorece al sector o a sus productos: promocion de consumo, crecimiento,\n"
-        "  mercados nuevos o exportaciones, congresos y eventos del gremio, campañas, reconocimientos, y\n"
-        "  tambien los anuncios de planes o medidas oficiales que benefician al sector (aunque el actor\n"
-        "  sea un ministerio o el Gobierno).\n"
-        "- Negativo: la nota daña al sector por un hecho ATRIBUIBLE a el o por una critica dirigida: una\n"
-        "  denuncia o sancion contra el gremio, su vocero o una empresa del sector, contaminacion, malas\n"
-        "  practicas, incumplimientos o escandalos que afectan su imagen.\n"
-        "- Neutro: hechos adversos SIN responsable del sector ni institucional (robos, hurtos, delitos,\n"
-        "  accidentes, incendios, inundaciones, clima), datos economicos, precios, y politica nacional sin\n"
-        "  relacion con el sector. Un robo a una granja NO es Negativo: es una victima, no una falta.\n"
-        "Ante duda, elige Neutro."
+        "COMO DECIDIR EL TONO (en este orden; el primero que se cumpla gana)\n"
+        "P1. La nota deja bien al sector o a la entidad: congreso o evento del gremio, campaña de\n"
+        "    consumo de sus productos, exportaciones o mercados nuevos, crecimiento o cifras buenas,\n"
+        "    reconocimiento, modernizacion, tecnologia, innovacion, competitividad, agenda o plan a\n"
+        "    futuro, o un plan oficial que beneficia al sector aunque lo anuncie un ministerio -> Positivo.\n"
+        "    Si la nota trata del sector en tono positivo o informativo y NO es una critica, es Positivo.\n"
+        "P2. La nota tiene una critica, denuncia, sancion o señalamiento contra el gremio, su vocero o una\n"
+        "    empresa del sector, o un hecho que se le atribuye y daña su imagen (contaminacion, malas\n"
+        "    practicas, incumplimiento) -> Negativo.\n"
+        "P3. Neutro SOLO si la nota no trata del sector ni lo afecta: politica nacional, otro gremio, otro\n"
+        "    sector, economia del pais, resultados de otra entidad. Tambien son Neutro: las notas de\n"
+        "    servicio o consejos al consumidor, las alertas economicas o de seguridad general, los datos\n"
+        "    de precios y la agenda de una entidad distinta.\n"
+        "NO son Neutro las notas del sector sobre tecnologia, congresos o planes: esas son Positivo.\n"
+        "Los robos, hurtos y delitos contra granjas o empresas del sector son Neutro: son la victima,\n"
+        "no la falta. Ante duda, elige Neutro."
     ),
 }
 
 REGLAS_SUBTEMA = (
-    "El Sub-tema resume EL HECHO de esa nota, no la categoria a la que pertenece, en una frase nominal\n"
-    "de 3 a 5 palabras (maximo 7), coherente y especifica.\n"
-    "- No empieces con verbo conjugado (nada de 'Entregan', 'Anuncian', 'Avanza', 'Denuncian').\n"
-    "  Si empiezas con un sustantivo de accion esta bien: 'Entrega del parque', 'Anuncio de inversiones'.\n"
-    "- No termines en preposicion o nexo.\n"
-    "- No uses dos puntos, punto y coma, barra vertical, comillas ni guiones largos.\n"
+    "El Sub-tema es el HECHO concreto de la nota, en 3 a 5 palabras (nunca mas de 7).\n"
+    "- Frase nominal, sin verbo conjugado al inicio (bien: 'Entrega del parque'; mal: 'Entregaron el\n"
+    "  parque'). Si empiezas con un sustantivo de accion esta bien: 'Anuncio de inversiones'.\n"
+    "- Sin terminar en preposicion o nexo, y sin dos puntos, comas, comillas ni barras.\n"
     "- No copies el titular ni recortes una frase del texto: sintetiza el hecho.\n"
-    "- Prohibido rotulos vacios: 'noticias generales', 'gestion institucional', 'varios', 'informacion'.\n"
-    "- No repitas el nombre de la entidad, del gremio ni del medio, ni uses etiquetas de categoria.\n"
-    "  MAL: 'Exportaciones y mercados internacionales de Fenavi' (es un tema, no un hecho),\n"
-    "       'Transformacion digital en el sector avicola' (generico).\n"
-    "  BIEN: 'Exportacion de pollo a Estados Unidos', 'Planes de IA en el congreso avicola'.\n"
-    "- Incluye el actor o el lugar cuando son lo que distingue el hecho: no 'Visita internacional'\n"
-    "  sino 'Visita de la embajadora de Australia'.\n"
-    "- Si el hecho ya aparece en la lista CANDIDATOS, reutiliza EXACTAMENTE ese texto (misma mayuscula y\n"
-    "  mismas palabras). Nunca crees una variante nueva de un hecho que ya tiene sub-tema."
+    "- Sin repetir el nombre del gremio, de la entidad ni del medio.\n"
+    "- Sin etiquetas de categoria. MAL: 'Exportaciones y mercados internacionales', 'Transformacion\n"
+    "  digital en el sector'. BIEN: 'Exportacion de pollo a Estados Unidos', 'Paneles de IA en el\n"
+    "  congreso avicola'.\n"
+    "- Incluye el actor o el lugar cuando son lo que distingue el hecho: no 'Visita internacional' sino\n"
+    "  'Visita de la embajadora de Australia'.\n"
+    "- Prohibido rotulos vacios: 'noticias generales', 'gestion institucional', 'varios'.\n"
+    "- Si el hecho ya esta en CANDIDATOS, copia ese texto EXACTO (mismas palabras y mayusculas).\n"
+    "  Nunca crees una variante nueva de un hecho que ya tiene sub-tema."
 )
 
 
@@ -1353,9 +1373,12 @@ def prompt_sistema(cfg):
         'REGLA DE SUB-TEMA',
         REGLAS_SUBTEMA,
         '',
-        'EJEMPLOS REALES YA ETIQUETADOS (imitalos en criterio, brevedad y mayusculas)',
+        'EJEMPLOS YA ETIQUETADOS',
     ]
-    for e in EJEMPLOS:
+    ejemplos = list(EJEMPLOS)
+    if str(cfg.get('criterio', '')).startswith('Favorabilidad'):
+        ejemplos += EJEMPLOS_SECTOR
+    for e in ejemplos:
         lineas.append('  TITULAR: %s' % e['titulo'])
         lineas.append('  ->  sub_tema: "%s"  |  tono: %s' % (e['sub_tema'], e['tono']))
     lineas += [
@@ -1378,6 +1401,7 @@ def prompt_lote(grupos_lote, candidatos):
         b.append('TEXTO: %s' % sq(g['texto'])[:700])
         bloques.append('\n'.join(b))
     msg = '\n\n'.join(bloques)
+    msg += ('\n\nRecuerda: el sub_tema de cada grupo debe tener entre 3 y 5 palabras, y solo JSON.')
     if candidatos:
         msg += ('\n\nCANDIDATOS (sub-temas ya usados; reutiliza el mismo texto si el hecho es el mismo):\n'
                 + '\n'.join('- %s' % c for c in candidatos[-120:]))
@@ -1449,8 +1473,9 @@ def reparar_lote(cfg, fallos):
     msgs = [{'role': 'system', 'content': prompt_sistema(cfg)},
             {'role': 'user', 'content':
              'Corrige SOLO estos sub-temas. Devuelve el mismo tono salvo que el tono no este permitido.\n'
-             'Un sub-tema valido tiene 3 a 7 palabras en frase nominal, no empieza con verbo conjugado,\n'
-             'no termina en preposicion y no lleva marcadores ni rotulos vacios.\n\n'
+             'Un sub-tema valido tiene 3 a 5 palabras (maximo 7) en frase nominal, no empieza con verbo\n'
+             'conjugado, no termina en preposicion y no lleva marcadores ni rotulos vacios. Si el problema\n'
+             'dice largo(N), recorta a 5 palabras sin perder el hecho.\n\n'
              + '\n\n'.join(detalle)
              + '\n\nResponde UNICAMENTE con {"resultados":[{"id":<grupo>,"sub_tema":"...","tono":"..."}]}'}]
     txt = llamar_llm(cfg, msgs)
@@ -1801,7 +1826,9 @@ def main():
                                        'muchos medios. Súbelo para separar notas parecidas pero distintas.')
         umbral_cuerpo = st.slider('Umbral de similitud de cuerpos (%)', 70, 100,
                                   UMBRAL_CUERPO_POR_DEFECTO, 1)
-        tam_lote = st.slider('Grupos por llamada al modelo', 5, 30, 15, 1)
+        tam_lote = st.slider('Grupos por llamada al modelo', 5, 30, 10, 1,
+                             help='Con modelos pequeños (gpt-4.1-nano) 10 funciona mejor; con mini se '
+                                  'puede subir a 15.')
         max_rep = st.slider('Máximo de reparaciones por lote', 0, 3, 2, 1)
 
         st.header('4. Temas')
