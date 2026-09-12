@@ -1283,6 +1283,28 @@ EJEMPLOS = [
  }
 ]
 
+EJEMPLOS_TEMA = [
+    {'titulo': 'La entidad presentó el informe Panorama de la Juventud 2026: desempleo juvenil y salud '
+               'mental en alerta',
+     'sub_tema': 'Informe sobre juventud y desempleo', 'tono': 'Neutro'},
+    {'titulo': 'El gremio advierte que la informalidad laboral sigue creciendo en el país',
+     'sub_tema': 'Informe sobre informalidad laboral', 'tono': 'Neutro'},
+    {'titulo': 'El estudio de la entidad revela brechas de salud mental en los jóvenes',
+     'sub_tema': 'Estudio sobre salud mental juvenil', 'tono': 'Neutro'},
+    {'titulo': 'Más de la mitad de los intentos de suicidio en Colombia corresponden a jóvenes entre 15 y 29 años',
+     'sub_tema': 'Intentos de suicidio en jóvenes', 'tono': 'Neutro'},
+    {'titulo': 'Obras de manejo ambiental no dan espera en la ciénaga del Totumo',
+     'sub_tema': 'Obras pendientes en la ciénaga', 'tono': 'Neutro'},
+    {'titulo': 'Muere una atleta y los especialistas en cuidados intensivos reaccionan en redes',
+     'sub_tema': 'Reacciones por muerte de atleta', 'tono': 'Neutro'},
+    {'titulo': 'Vecinos denuncian que la universidad no ha terminado la obra del bloque nuevo',
+     'sub_tema': 'Denuncia por obra sin terminar', 'tono': 'Negativo'},
+    {'titulo': 'Roban 180.000 huevos en una granja del Atlántico y la Policía recupera los camiones',
+     'sub_tema': 'Robo a granja del Atlántico', 'tono': 'Neutro'},
+    {'titulo': 'La Contraloría cuestiona los sobrecostos en la obra que ejecuta la entidad',
+     'sub_tema': 'Cuestionamientos por sobrecostos', 'tono': 'Negativo'},
+]
+
 EJEMPLOS_SECTOR = [
     {'titulo': 'FENAVI realizará su congreso de 2028 en Barranquilla',
      'sub_tema': 'Congreso avícola 2028 en Barranquilla', 'tono': 'Positivo'},
@@ -1308,6 +1330,17 @@ CRITERIOS_TONO = {
         "  beneficio para la comunidad, programa, reconocimiento, cifra buena, declaracion que los deja bien).\n"
         "- Negativo: existe critica, reclamo, sancion, denuncia o evaluacion negativa DIRIGIDA a la entidad,\n"
         "  a su administracion o a sus funcionarios.\n"
+        "- LA PREGUNTA CLAVE antes de escribir Negativo: ¿de quien habla la nota? Si la entidad o su vocero\n"
+        "  NO aparece como responsable, señalado o protagonista de la critica, el tono es Neutro. Los temas\n"
+        "  tristes o graves NO son Negativo para la entidad: muertes, suicidio, delincuencia, desempleo,\n"
+        "  pobreza, inundaciones, obras inconclusas de terceros, quejas contra otros. Una nota puede\n"
+        "  mencionar a la entidad y seguir siendo Neutro (la entidad estudia el problema, participa en un\n"
+        "  foro, firma una alianza o es una voz mas entre varias).\n"
+        "- EL TEMA NO DECIDE EL TONO. Si la entidad publica un informe, estudio, encuesta o campaña sobre un\n"
+        "  problema (desempleo, salud mental, pobreza, violencia, inseguridad, medio ambiente), el tono es\n"
+        "  Neutro, y Positivo si la entidad aparece como autora de un aporte (diagnostico, propuesta,\n"
+        "  solucion, alianza). Que el tema sea grave o triste NO hace Negativo a quien lo investiga.\n"
+        "  Negativo exige siempre un ataque, critica o señalamiento CONTRA la entidad o su vocero.\n"
         "- Neutro: todo lo demas. Incluye hechos malos sin responsable institucional (inundaciones,\n"
         "  homicidios, accidentes, robos, alzas de precios), la cobertura de OTRA entidad del mismo\n"
         "  territorio, y los casos en que el vocero denuncia a un tercero.\n"
@@ -1328,6 +1361,9 @@ CRITERIOS_TONO = {
         "    servicio o consejos al consumidor, las alertas economicas o de seguridad general, los datos\n"
         "    de precios y la agenda de una entidad distinta.\n"
         "NO son Neutro las notas del sector sobre tecnologia, congresos o planes: esas son Positivo.\n"
+        "EL TEMA NO DECIDE EL TONO: si el gremio o la entidad publica un informe o estudio sobre un\n"
+        "problema (desempleo, salud mental, pobreza, precios, inseguridad), no es Negativo; es Neutro o\n"
+        "Positivo segun su encuadre. Negativo exige critica o hecho atribuible al sector.\n"
         "Los robos, hurtos y delitos contra granjas o empresas del sector son Neutro: son la victima,\n"
         "no la falta. Ante duda, elige Neutro."
     ),
@@ -1375,7 +1411,7 @@ def prompt_sistema(cfg):
         '',
         'EJEMPLOS YA ETIQUETADOS',
     ]
-    ejemplos = list(EJEMPLOS)
+    ejemplos = list(EJEMPLOS) + EJEMPLOS_TEMA
     if str(cfg.get('criterio', '')).startswith('Favorabilidad'):
         ejemplos += EJEMPLOS_SECTOR
     for e in ejemplos:
@@ -1813,11 +1849,24 @@ def main():
         base_def, modelo_def = PROVEEDORES[proveedor]
         base_url = st.text_input('base_url', _sec.get('base_url') or base_def)
         modelo = st.text_input('Modelo', _sec.get('modelo') or modelo_def)
-        api_key = st.text_input('API key', value=_sec.get('api_key', ''), type='password',
-                                help='Si la guardas en los Secrets de Streamlit (llm_api_key), '
-                                     'aparece aquí ya cargada.')
-        if _sec.get('api_key'):
-            st.caption('Usando la API key de los Secrets.')
+        clave_secrets = _sec.get('api_key', '')
+        if clave_secrets:
+            # La key vive SOLO en el servidor: nunca se pasa como valor de un widget, porque
+            # entonces viaja al navegador y se puede leer con las herramientas del desarrollador.
+            api_key = clave_secrets
+            st.caption('🔒 API key cargada desde los Secrets. No se muestra ni se envía al navegador.')
+            with st.expander('Usar otra API key solo en esta sesión'):
+                tmp = st.text_input('API key temporal', value='', type='password',
+                                    help='No se guarda: vive solo en esta pestaña del navegador.')
+                if tmp.strip():
+                    api_key = tmp.strip()
+                    st.caption('Usando la key temporal de esta sesión.')
+        else:
+            api_key = st.text_input('API key', value='', type='password',
+                                    help='No está en los Secrets: se escribe aquí y vive solo en esta '
+                                         'sesión. Recomendado: guárdala en los Secrets de Streamlit.')
+            if not api_key.strip():
+                st.caption('Sin API key: se usará la que escribas aquí (solo esta sesión).')
 
         st.header('3. Agrupación y lotes')
         umbral_titulo = st.slider('Umbral de similitud de titulares (%)', 75, 100,

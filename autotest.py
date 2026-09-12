@@ -213,6 +213,18 @@ def main():
     check('acepta contraseña guardada como hash sha256',
           app.coincide_password('clave-3', h) is True and app.coincide_password('clave-4', h) is False)
 
+    print('\n7. reglas que no pueden desaparecer')
+    for nombre, txt in app.CRITERIOS_TONO.items():
+        check('el criterio "%s" aclara que el tema no decide el tono' % nombre[:22],
+              ('TEMA NO DECIDE EL TONO' in txt) or ('EL TEMA NO DECIDE' in txt))
+    check('hay ejemplos de tema negativo con tono Neutro',
+          sum(1 for e in app.EJEMPLOS_TEMA + app.EJEMPLOS + app.EJEMPLOS_SECTOR if e['tono'] == 'Neutro') >= 5)
+    check('hay ejemplos de critica dirigida con tono Negativo',
+          any(e['tono'] == 'Negativo' for e in app.EJEMPLOS_TEMA))
+    check('la app no usa la key de los Secrets como valor de un widget',
+          "value=_sec.get('api_key', '')" not in open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                   'app.py'), encoding='utf-8').read())
+
     print('\n' + ('TODO OK' if not FALLOS else 'FALLARON: %s' % FALLOS))
     return 1 if FALLOS else 0
 
