@@ -266,6 +266,16 @@ def main():
     check('todo lo que llama main() existe (función del módulo o import)', not desconocidos,
           str(desconocidos))
 
+    print('\n10. recortes pedidos (sin auditoría, sin sección 4, tema resuelto por API)')
+    src = open('app.py', encoding='utf-8').read()
+    check('la sección "4. Temas" ya no se muestra', "st.header('4. Temas')" not in src)
+    check('la auditoría ya no se muestra', "st.subheader('Auditoría')" not in src)
+    check('no queda el aviso bloqueante de grupos sin cubo', 'Grupos sin cubo de Tema' not in src)
+    check('la lista de Temas se genera desde el archivo', 'proponer_taxonomia(cfg, grupos' in src)
+    check('los grupos sin cubo se resuelven por API y con respaldo determinista',
+          'cubo_de_respaldo' in src and "origen[q['grupo']] = 'llm'" in src)
+    check('el clasificador de cubos recibe el texto de la nota', 'TEXTO: %s' in src)
+
     print('\n7. reglas que no pueden desaparecer')
     for nombre, txt in app.CRITERIOS_TONO.items():
         check('el criterio "%s" aclara que el tema no decide el tono' % nombre[:22],

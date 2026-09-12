@@ -1607,7 +1607,9 @@ def elegir_cubo(cfg, pendientes, tax, permitir_nuevos=True):
     lista = '\n'.join('- %s' % t for t in tax['temas'] if nz(t) not in CUBO_PROHIBIDO)
     bloques = []
     for p in pendientes:
-        bloques.append('GRUPO id=%d\nSUB-TEMA: %s\nTITULAR: %s' % (p['grupo'], p['sub_tema'], sq(p['titulo'])[:180]))
+        bloques.append('GRUPO id=%d\nSUB-TEMA: %s\nTITULAR: %s\nTEXTO: %s'
+                       % (p['grupo'], p['sub_tema'], sq(p['titulo'])[:180],
+                          sq(p.get('texto', ''))[:260]))
     extra = ('Si ningun cubo sirve, propón uno NUEVO en 2 a 5 palabras que describa el asunto concreto\n'
              '(por ejemplo "Tramite de pasaportes"). No se acepta un cubo generico.\n' if permitir_nuevos
              else 'No propongas cubos nuevos: elige siempre uno de la lista.\n')
@@ -1629,6 +1631,130 @@ def elegir_cubo(cfg, pendientes, tax, permitir_nuevos=True):
     return out
 
 
+def cubo_de_respaldo(sub_tema, titulo):
+    """Último recurso determinista: un cubo específico derivado del sub-tema (nunca "Otros")."""
+    base = sq(sub_tema) or sq(titulo) or 'Asuntos del periodo'
+    palabras = [w for w in re.split(r'\s+', base) if len(w) > 2][:4]
+    nombre = ' '.join(palabras).strip() or 'Asuntos del periodo'
+    return ('Asuntos especificos del periodo' if nz(nombre) in CUBO_PROHIBIDO else nombre)[:60]
+
+
+def _mismo_cubo(a, b):
+    """Dos cubos son el mismo si son casi iguales o si uno es el otro con un añadido."""
+    from rapidfuzz import fuzz
+    if fuzz.token_sort_ratio(nz(a), nz(b)) >= 90:
+        return True
+    ta, tb = set(nz(a).split()), set(nz(b).split())
+    chico, grande = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    return bool(chico) and chico <= grande and len(chico) >= 2 and 0 < len(grande) - len(chico) <= 3
+
+
+def canonizar_nuevos(temas, tax):
+    """Unifica cubos NUEVOS que son variantes del mismo nombre (los de la lista no se tocan)."""
+    en_lista = {nz(t) for t in tax.get('temas', [])}
+    cambios = 0
+    for a in list(temas):
+        for b in list(temas):
+            if a >= b:
+                continue
+            if nz(temas[a]) in en_lista or nz(temas[b]) in en_lista:
+                continue
+            if not _mismo_cubo(temas[a], temas[b]):
+                continue
+            # gana el nombre más corto, o el que ya tenga más grupos
+            na = sum(1 for x in temas if temas[x] == temas[a])
+            nb = sum(1 for x in temas if temas[x] == temas[b])
+            ganador = temas[a] if (na > nb or (na == nb and len(temas[a]) <= len(temas[b]))) else temas[b]
+            perdedor = temas[b] if ganador == temas[a] else temas[a]
+            for x in list(temas):
+                if temas[x] == perdedor:
+                    temas[x] = ganador
+            cambios += 1
+    return cambios
+
+
+def derivar_reglas(cubos):
+    """Convierte los cubos en reglas léxicas para el primer pase determinista."""
+    reglas = []
+    for nombre in cubos:
+        toks = [t for t in nz(nombre).split() if t]
+        claves = [nz(nombre)]
+        for t in toks:
+            if len(t) >= 4 and t not in CONECT and t not in FILLER and t not in MARCO and t not in claves:
+                claves.append(t)
+        if len(claves) > 1:
+            reglas.append({'tema': nombre, 'claves': claves})
+    reglas.sort(key=lambda r: -len(nz(r['tema']).split()))
+    return reglas
+
+
+def _muestreo_grupos(grupos, etiquetas, por_bloque=35, max_bloques=12):
+    lineas = []
+    for g in grupos:
+        st_ = (etiquetas.get(g['grupo']) or {}).get('sub_tema') or ''
+        lineas.append('- %s | %s' % (st_[:60], sq(g['titulo'])[:110]))
+    if len(lineas) > por_bloque * max_bloques:
+        paso = max(1, len(lineas) // (por_bloque * max_bloques))
+        lineas = lineas[::paso]
+    return [lineas[i:i + por_bloque] for i in range(0, len(lineas), por_bloque)]
+
+
+def proponer_taxonomia(cfg, grupos, etiquetas, objetivo=16, progreso=None):
+    """Construye la lista de Temas A PARTIR DEL CONTENIDO del archivo, sin lista fija.
+
+    Los clientes son muy distintos (universidades, sector público, privado, marcas), así que los
+    cubos se proponen leyendo los hechos del propio archivo: por bloques y con una consolidación
+    que elimina duplicados y solapamientos.
+    """
+    if progreso:
+        progreso('Generando la lista de Temas a partir del archivo...')
+    propuestas = []
+    for bloque in _muestreo_grupos(grupos, etiquetas):
+        msgs = [{'role': 'system', 'content':
+                 'Eres analista de medios en Colombia. Agrupas hechos en cubos temáticos en JSON.'},
+                {'role': 'user', 'content':
+                 'Estos son hechos de un dossier de prensa:\n\n' + '\n'.join(bloque) +
+                 '\n\nPropón entre 10 y 14 CUBOS TEMATICOS que los agrupen, pensando en un cliente '
+                 'colombiano (puede ser universidad, entidad pública, empresa privada o marca).\n'
+                 'Reglas: nombres de 2 a 5 palabras; específicos de ESTOS hechos, no genéricos; sin '
+                 'solaparse entre sí; nada de "Otros", "Varios", "General" ni "Información".\n'
+                 'Responde solo JSON: {"cubos":["Cubo uno","Cubo dos"]}'}]
+        try:
+            data = _json_loose(llamar_llm(cfg, msgs)) or {}
+        except Exception:
+            data = {}
+        for c in data.get('cubos', []) or []:
+            v = cubo_valido(c, {'temas': propuestas}, permitir_nuevos=True)
+            if v and not any(_mismo_cubo(v, x) for x in propuestas):
+                propuestas.append(v)
+    if not propuestas:
+        return {'nota': 'lista de respaldo', 'temas': list(TAX_GOBIERNO['temas']),
+                'reglas': list(TAX_GOBIERNO['reglas'])}
+    msgs = [{'role': 'system', 'content':
+             'Eres analista de medios en Colombia. Consolidas listas de cubos temáticos en JSON.'},
+            {'role': 'user', 'content':
+             'Estos cubos fueron propuestos para el mismo dossier:\n\n'
+             + '\n'.join('- %s' % x for x in propuestas) +
+             '\n\nDevuelve la LISTA FINAL de %d cubos (menos si no hay materia): sin duplicados, '
+             'sin solaparse, de 2 a 5 palabras, específicos, sin "Otros" ni genéricos.\n'
+             'Responde solo JSON: {"cubos":["..."]}' % objetivo}]
+    try:
+        data = _json_loose(llamar_llm(cfg, msgs)) or {}
+    except Exception:
+        data = {}
+    finales = []
+    for c in data.get('cubos', []) or propuestas:
+        if not isinstance(c, str):
+            continue
+        v = cubo_valido(c, {'temas': finales}, permitir_nuevos=True)
+        if v and not any(_mismo_cubo(v, x) for x in finales):
+            finales.append(v)
+    if len(finales) < 3:
+        finales = propuestas[:max(3, objetivo)]
+    return {'nota': 'Cubos generados automáticamente a partir del contenido de este archivo.',
+            'temas': finales, 'reglas': derivar_reglas(finales)}
+
+
 def asignar_temas(cfg, grupos, etiquetas, tax, permitir_nuevos=True, overrides=None):
     overrides = overrides or {}
     temas, pendientes, origen = {}, [], {}
@@ -1643,7 +1769,8 @@ def asignar_temas(cfg, grupos, etiquetas, tax, permitir_nuevos=True, overrides=N
             temas[g['grupo']] = t
             origen[g['grupo']] = 'regla:%s' % k
         else:
-            pendientes.append({'grupo': g['grupo'], 'sub_tema': e.get('sub_tema', ''), 'titulo': g['titulo']})
+            pendientes.append({'grupo': g['grupo'], 'sub_tema': e.get('sub_tema', ''),
+                               'titulo': g['titulo'], 'texto': g.get('texto', '')})
     if pendientes:
         elegidos = elegir_cubo(cfg, pendientes, tax, permitir_nuevos)
         for p in pendientes:
@@ -1916,15 +2043,6 @@ def main():
                                   'puede subir a 15.')
         max_rep = st.slider('Máximo de reparaciones por lote', 0, 3, 2, 1)
 
-        st.header('4. Temas')
-        tax_nombre = st.selectbox('Lista de Temas', ['Gobierno territorial (21 cubos)',
-                                                     'Gremio o sector (16 cubos)'], index=0)
-        permitir_nuevos = st.checkbox('Permitir que la IA cree cubos nuevos específicos', True,
-                                      help='Si no hay cubo que sirva, la IA puede proponer uno nuevo '
-                                           'de 2 a 5 palabras. Nunca puede escribir "Otros".')
-        tax_json = st.text_area('Editar la lista de Temas (JSON)',
-                                json.dumps(TAX_GOBIERNO if tax_nombre.startswith('Gobierno') else TAX_GREMIO,
-                                           ensure_ascii=False, indent=1), height=150)
         if st.session_state.get('_auth_ok'):
             st.divider()
             if st.button('Cerrar sesión'):
@@ -1941,7 +2059,8 @@ def main():
                 '2. **Sub-tema primero, tono después**: el resumen del hecho guía el juicio del tono.\n'
                 '3. **Validador + reparación**: 3-7 palabras, sin verbo al inicio, sin rótulos vacíos; '
                 'el modelo corrige lo que no pasa.\n'
-                '4. **Temas por reglas**: el LLM no inventa el Tema; elige dentro de una lista cerrada.\n'
+                '4. **Temas**: la lista de cubos se genera desde este mismo archivo y el LLM elige '
+                 'dentro de ella; lo que no case se resuelve por API.\n'
                 '5. **Sin "Otros"**: la descarga se bloquea si algún grupo queda sin cubo.')
         return
 
@@ -1974,12 +2093,6 @@ def main():
     correr = st.button('▶ Correr análisis', type='primary', disabled=not listo)
 
     if correr:
-        try:
-            tax = json.loads(tax_json)
-            assert 'temas' in tax and 'reglas' in tax
-        except Exception as e:
-            st.error('La lista de Temas (JSON) no es válida: %s' % e)
-            return
         cfg = {'entidad': entidad.strip(),
                'voceros': [v.strip() for v in voceros.split(',') if v.strip()],
                'alias': [a.strip() for a in re.split(r'[,\n]', alias) if a.strip()],
@@ -2012,8 +2125,28 @@ def main():
             if corregidos:
                 st.caption('Guarda del tono: %d Negativos sin señalamiento dirigido pasaron a Neutro.'
                            % len(corregidos))
-            barra.progress(0.85, 'Asignando Temas...')
-            temas, pendientes, origen = asignar_temas(cfg, grupos, etiquetas, tax, permitir_nuevos)
+            barra.progress(0.82, 'Generando la lista de Temas a partir del archivo...')
+            tax = proponer_taxonomia(cfg, grupos, etiquetas, objetivo=16,
+                                     progreso=lambda m: barra.progress(0.82, m))
+            barra.progress(0.88, 'Asignando Temas...')
+            temas, pendientes, origen = asignar_temas(cfg, grupos, etiquetas, tax, True)
+            canonizar_nuevos(temas, tax)
+            # Grupos sin cubo: se resuelven por API según el texto, sin pedirle nada al usuario.
+            for _ronda in range(2):
+                faltan = [q for q in pendientes if q['grupo'] not in temas]
+                if not faltan:
+                    break
+                elegidos = elegir_cubo(cfg, faltan, tax, True)
+                for q in faltan:
+                    if elegidos.get(q['grupo']):
+                        temas[q['grupo']] = elegidos[q['grupo']]
+                        origen[q['grupo']] = 'llm'
+            for g in grupos:                      # último recurso determinista: nunca queda vacío
+                if not temas.get(g['grupo']):
+                    temas[g['grupo']] = cubo_de_respaldo(
+                        etiquetas.get(g['grupo'], {}).get('sub_tema', ''), g['titulo'])
+                    origen[g['grupo']] = 'respaldo'
+            pendientes = []
         except Exception as e:
             msg = str(e)
             st.error('Se interrumpió el análisis: %s' % msg[:400])
@@ -2040,74 +2173,15 @@ def main():
     etiquetas, temas, grupos = res['etiquetas'], res['temas'], res['grupos']
     cfg, tax = res['cfg'], res['tax']
 
-    st.subheader('Auditoría')
-    ct = collections.Counter(e.get('tono') or 'SIN TONO' for e in etiquetas.values())
-    cm = collections.Counter(temas.get(g['grupo'], 'SIN CUBO') for g in grupos)
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric('Grupos', len(grupos))
-    k2.metric('Positivo / Neutro / Negativo',
-              '%d / %d / %d' % (ct.get('Positivo', 0), ct.get('Neutro', 0), ct.get('Negativo', 0)))
-    k3.metric('Sub-temas distintos', len(set(e.get('sub_tema') for e in etiquetas.values())))
-    k4.metric('Cubos usados', len(cm))
-
-    tab = pd.DataFrame([{'Grupo': g['grupo'], 'Menciones': g['n'], 'Medio(s)': '',
-                         'Título': g['titulo'][:110], 'Tono': etiquetas.get(g['grupo'], {}).get('tono', ''),
-                         'Tema': temas.get(g['grupo'], 'SIN ASIGNAR'),
-                         'Sub-tema': etiquetas.get(g['grupo'], {}).get('sub_tema', ''),
-                         'Origen del tema': res['origen'].get(g['grupo'], '')} for g in grupos])
-    st.dataframe(tab, use_container_width=True, height=430)
-    with st.expander('Temas (cuántos sub-temas agrupa cada cubo)'):
-        st.dataframe(pd.DataFrame([{'Tema': t, 'Grupos': len([1 for g in grupos if temas.get(g['grupo']) == t]),
-                                    'Menciones': sum(g['n'] for g in grupos if temas.get(g['grupo']) == t),
-                                    'Sub-temas': ' | '.join(sorted(set(etiquetas.get(g['grupo'], {}).get('sub_tema', '') for g in grupos if temas.get(g['grupo']) == t)))}
-                                   for t in sorted(set(temas.values()))]), use_container_width=True)
     faltan_tono = [g for g in grupos if not etiquetas.get(g['grupo'], {}).get('tono')]
     if faltan_tono:
-        st.error('Hay %d grupos sin tono (revisa la API key, el modelo o el tamaño de lote). '
-                 'No descargues todavía.' % len(faltan_tono))
-    if res['bitacora']:
-        with st.expander('Control de calidad (%d avisos de reparación)' % len(res['bitacora'])):
-            st.dataframe(pd.DataFrame(res['bitacora'][:200]), use_container_width=True)
-
-    # ---- resolución obligatoria de grupos sin cubo: NUNCA "Otros" ----
-    pend = [g for g in grupos if not temas.get(g['grupo'])]
-    if pend:
-        st.subheader('⚠️ Grupos sin cubo de Tema')
-        st.caption('Ningún grupo puede quedar en "Otros". Asígnale un cubo existente o crea uno nuevo '
-                   'específico (2 a 5 palabras).')
-        opciones = [t for t in tax['temas'] if nz(t) not in CUBO_PROHIBIDO] + ['➕ Cubo nuevo...']
-        with st.form('resolver'):
-            nuevas = {}
-            for g in pend:
-                c1, c2, c3 = st.columns([1, 2, 2])
-                c1.write('G%d (%d)' % (g['grupo'], g['n']))
-                c2.write(str(g['titulo'])[:90] or etiquetas.get(g['grupo'], {}).get('sub_tema', ''))
-                sel = c3.selectbox('Tema', opciones, key='sel_%d' % g['grupo'], label_visibility='collapsed')
-                if sel == '➕ Cubo nuevo...':
-                    nuevas[g['grupo']] = c3.text_input('Nuevo cubo', key='new_%d' % g['grupo'],
-                                                       label_visibility='collapsed',
-                                                       placeholder='Nombre del cubo nuevo')
-                else:
-                    nuevas[g['grupo']] = sel
-            if st.form_submit_button('Aplicar y poder descargar'):
-                rechazados = []
-                for gid, t in nuevas.items():
-                    v = cubo_valido(t, tax, permitir_nuevos=True)
-                    if v:
-                        temas[gid] = v
-                    else:
-                        rechazados.append(str(t)[:40])
-                if rechazados:
-                    st.warning('No se aceptaron (un Tema debe ser específico, sin "Otros" ni rótulos '
-                               'vacíos): %s' % ', '.join(rechazados))
-                st.rerun()
-        return
-
+        st.warning('%d grupo(s) quedaron sin tono (revisa la API key o el modelo). Puedes descargar '
+                   'igual.' % len(faltan_tono))
     out = construir_xlsx(cfg, res['header'], res['filas'], grupos, res['mapa'], etiquetas, temas,
                          res['bitacora'])
     nombre = 'Menciones_%s_Tono_Tema_Subtemas.xlsx' % re.sub(r'[^A-Za-z0-9]+', '_',
                                                              entidad.strip())[:40].strip('_')
-    st.success('Listo. %d grupos, %d temas, ningún grupo sin cubo.' % (len(grupos), len(cm)))
+    st.success('Listo. %d grupos, %d temas, ningún grupo sin cubo.' % (len(grupos), len(set(temas.values()))))
     st.download_button('⬇️ Descargar XLSX', out.getvalue(), file_name=nombre,
                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
