@@ -238,6 +238,34 @@ def main():
     check('la votación empata en Neutro y elige el sub-tema más repetido',
           comb[1]['tono'] == 'Neutro' and comb[1]['sub_tema'] == 'Robo en granja', str(comb))
 
+    print('\n9. orden de definiciones (una función definida después de invocar main() no existe al usarse)')
+    import ast
+    arbol = ast.parse(open('app.py', encoding='utf-8').read())
+    defs = {n.name: n.lineno for n in arbol.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    linea_main = None
+    for n in arbol.body:
+        if isinstance(n, ast.If):
+            for sub in n.body:
+                if (isinstance(sub, ast.Expr) and isinstance(sub.value, ast.Call)
+                        and getattr(sub.value.func, 'id', '') == 'main'):
+                    linea_main = sub.value.lineno
+    tarde = {k: v for k, v in defs.items() if linea_main and v > linea_main}
+    check('ninguna función queda definida después de invocar main()', not tarde, str(tarde))
+    # y que todo nombre llamado dentro de main() exista como función del módulo o import
+    usados = set()
+    for n in arbol.body:
+        if isinstance(n, ast.FunctionDef) and n.name == 'main':
+            for x in ast.walk(n):
+                if isinstance(x, ast.Call) and isinstance(x.func, ast.Name):
+                    usados.add(x.func.id)
+    import builtins
+    internas = set(dir(builtins))
+    desconocidos = sorted(u for u in usados
+                          if u not in defs and u not in app.__dict__ and u not in internas)
+    check('todo lo que llama main() existe (función del módulo o import)', not desconocidos,
+          str(desconocidos))
+
     print('\n7. reglas que no pueden desaparecer')
     for nombre, txt in app.CRITERIOS_TONO.items():
         check('el criterio "%s" aclara que el tema no decide el tono' % nombre[:22],

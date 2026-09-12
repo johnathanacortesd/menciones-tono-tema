@@ -2112,9 +2112,6 @@ def main():
                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
-if __name__ == '__main__':
-    main()
-
 # ============================================================================
 # Guarda determinista del tono: "el tema negativo no es tono negativo"
 # ============================================================================
@@ -2163,3 +2160,5 @@ def aplicar_guarda_tono(grupos, etiquetas, brand, aliases):
             corregidos.append(g['grupo'])
     return corregidos
 
+if __name__ == '__main__':
+    main()
