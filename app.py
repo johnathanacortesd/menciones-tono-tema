@@ -49,6 +49,7 @@ Requisitos: streamlit, openpyxl, pandas, requests, rapidfuzz, numpy.
 """
 
 import collections
+import datetime
 from collections.abc import Mapping
 import hashlib
 import hmac
@@ -57,6 +58,7 @@ import json
 import re
 import time
 import unicodedata
+import xlsxwriter
 
 import numpy as np
 import pandas as pd
@@ -1789,116 +1791,166 @@ FILL = {'Positivo': PatternFill('solid', fgColor='C6EFCE'),
         'Negativo': PatternFill('solid', fgColor='FFC7CE')}
 
 
-def construir_xlsx(cfg, header, datos, grupos, mapa, etiquetas, temas, bitacora):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = 'Menciones'
-    EXTRA = ['Fila original', 'Grupo de similitud', 'Tono', 'Tema', 'Sub-tema', 'Criterio del tono']
-    for i, c in enumerate(list(header) + EXTRA, 1):
-        cell = ws.cell(row=1, column=i, value=c)
-        color = {'Tono': 'C00000', 'Tema': '1F6F43', 'Sub-tema': '4E7B2F'}.get(c, '1F4E79')
-        if c.startswith('Grupo') or c.startswith('Fila'):
-            color = '7030A0'
-        cell.fill = PatternFill('solid', fgColor=color)
-        cell.font = Font(bold=True, color='FFFFFF')
-    crit = {'Positivo': 'Favorable a %s (obra, logro o declaracion)' % cfg['entidad'],
-            'Negativo': 'Critica o senalamiento dirigido a %s' % cfg['entidad'],
-            'Neutro': 'Sin logro ni critica dirigida a %s' % cfg['entidad']}
-    for r in datos:
-        gid = mapa.get(str(r.get('_id')))
-        e = etiquetas.get(gid, {})
-        ws.append([ctrl(v) for v in r['_fila']] + [r['_fila_n'], gid, e.get('tono', ''),
-                                                   temas.get(gid, ''), e.get('sub_tema', ''),
-                                                   crit.get(e.get('tono', ''), '')])
-        ws.cell(row=ws.max_row, column=len(header) + 3).fill = FILL.get(e.get('tono'), FILL['Neutro'])
-    for k, v in {'A': 6, 'B': 10}.items():
-        ws.column_dimensions[k].width = v
-    for col in range(3, len(header) + 1):
-        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 26
-    for col in range(len(header) + 1, len(header) + 7):
-        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 30
-
-    ws2 = wb.create_sheet('Temas (agrupa Sub-temas)')
-    for i, c in enumerate(['Tema', 'Grupos', 'Menciones', 'Sub-temas agrupados'], 1):
-        cell = ws2.cell(row=1, column=i, value=c)
-        cell.fill = PatternFill('solid', fgColor='1F4E79')
-        cell.font = Font(bold=True, color='FFFFFF')
-    por = collections.defaultdict(list)
-    for g in grupos:
-        por[temas.get(g['grupo'], 'SIN ASIGNAR')].append(g)
-    for t, gs in sorted(por.items(), key=lambda x: -sum(g['n'] for g in x[1])):
-        ws2.append([t, len(gs), sum(g['n'] for g in gs),
-                    ' | '.join(sorted(set(etiquetas.get(g['grupo'], {}).get('sub_tema', '') for g in gs)))])
-    for k, v in {'A': 42, 'B': 9, 'C': 11, 'D': 130}.items():
-        ws2.column_dimensions[k].width = v
-
-    ws3 = wb.create_sheet('Grupos')
-    for i, c in enumerate(['Grupo', 'Menciones', 'Medios', 'Título representativo', 'Tono', 'Tema', 'Sub-tema'], 1):
-        cell = ws3.cell(row=1, column=i, value=c)
-        cell.fill = PatternFill('solid', fgColor='1F4E79')
-        cell.font = Font(bold=True, color='FFFFFF')
-    for g in grupos:
-        e = etiquetas.get(g['grupo'], {})
-        ws3.append([g['grupo'], g['n'], '', ctrl(g['titulo'])[:200], e.get('tono', ''),
-                    temas.get(g['grupo'], ''), e.get('sub_tema', '')])
-        ws3.cell(row=ws3.max_row, column=5).fill = FILL.get(e.get('tono'), FILL['Neutro'])
-    for k, v in {'A': 7, 'B': 10, 'C': 22, 'D': 54, 'E': 10, 'F': 34, 'G': 42}.items():
-        ws3.column_dimensions[k].width = v
-
-    ws4 = wb.create_sheet('Resumen')
-    ct = collections.Counter(e.get('tono') for e in etiquetas.values())
-    cm = collections.Counter(temas.values())
-    def put(a, b=None):
-        ws4.append([ctrl(a)] + ([ctrl(b)] if b is not None else []))
-    put('Sentimiento (Tono), Tema y Sub-tema')
-    put('Entidad / vocero', '%s · %s' % (cfg.get('entidad', ''), ', '.join(cfg.get('voceros', []) or [])))
-    put('Alias considerados', ', '.join(cfg.get('alias', []) or []))
-    put('Criterio del tono', cfg.get('criterio', ''))
-    put('Modelo', '%s (%s)' % (cfg.get('modelo', ''), cfg.get('proveedor', '')))
-    put('Texto base', '%s + %s' % (cfg.get('col_titulo', ''), cfg.get('col_texto', '')))
-    put('')
-    put('TONO')
-    for k in TONOS:
-        put('   ' + k, '%d grupos | %d menciones' % (ct.get(k, 0),
-            sum(g['n'] for g in grupos if etiquetas.get(g['grupo'], {}).get('tono') == k)))
-    put('')
-    put('TEMA (cubo que agrupa sub-temas; ningun grupo queda sin cubo)')
-    for k, v in cm.most_common():
-        put('   ' + k, '%d grupos' % v)
-    put('')
-    put('SUB-TEMA')
-    put('   distintos', str(len(set(e.get('sub_tema') for e in etiquetas.values()))))
-    put('   largo medio', '%.1f palabras' % (sum(len(str(e.get('sub_tema', '')).split())
-                                                for e in etiquetas.values()) / max(1, len(etiquetas))))
-    tam = collections.Counter(g['n'] for g in grupos)
-    put('')
-    put('UNIFORMIDAD')
-    put('   regla', 'menciones identicas o similares comparten Tono, Tema y Sub-tema')
-    put('   grupos', '%d (un miembro: %d · con 2+ menciones: %d)'
-        % (len(grupos), tam.get(1, 0), sum(v for k, v in tam.items() if k > 1)))
-    if bitacora:
-        put('')
-        put('CONTROL DE CALIDAD')
-        put('   reparaciones y avisos', str(len(bitacora)))
-        for b in bitacora[:40]:
-            put('   - G%s %s' % (b['grupo'] or '', b['titulo'][:60]), b['problemas'][:90])
-    ws4.column_dimensions['A'].width = 30
-    ws4.column_dimensions['B'].width = 110
-    for row in ws4.iter_rows():
-        for c in row:
-            c.alignment = Alignment(vertical='top', wrap_text=True)
-    b = io.BytesIO()
-    wb.save(b)
-    b.seek(0)
-    return b
-
-
-# ============================================================================
-# 7. LECTURA DEL XLSX DE ENTRADA
-# ============================================================================
 CAND_TITULO = ('título', 'titulo', 'title', 'titular', 'headline', 'encabezado')
 CAND_TEXTO = ('cuerpoes', 'cuerpo', 'contenido', 'texto', 'body', 'text', 'nota', 'resumen - aclaracion')
 CAND_ID = ('noticiaid', 'id', 'ref', 'registro', 'nro', 'codigo')
+
+
+# --- nombres de columna con formato propio, igual que Grill-API ---
+THOUSANDS_COLS = {'Nro. Pagina', 'Dimensión', 'Duración - Nro. Caracteres', 'Tier', 'Audiencia'}
+CURRENCY_COLS = {'CPE', 'revalorización'}
+ID_COLS = {'ID Noticia', 'ID duplicada', 'NoticiaId'}
+HYPERLINK_LIKE = {'Link Nota', 'Link (Streaming - Imagen)'}
+COLS_ANCHO_55 = {'Título', 'Resumen - Aclaracion', 'resumen corto', 'Contexto analizado'}
+
+
+def _numero(valor):
+    """Convierte a número el texto de una columna numérica, con la MISMA lógica que Grill-API.
+
+    Respeta el formato colombiano: '1.234' son mil doscientos treinta y cuatro; '12,5' es doce y
+    medio. Devuelve None cuando el texto no es numérico (y entonces se escribe tal cual).
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, (int, float)):
+        return int(valor) if isinstance(valor, float) and valor.is_integer() else valor
+    t = str(valor).strip()
+    if not t:
+        return None
+    t = re.sub(r"[^\d.,\-eE]", "", t)
+    if not t:
+        return None
+    puntos, comas = t.count('.'), t.count(',')
+    if puntos > 1 and comas == 0:
+        t = t.replace('.', '')
+    elif comas > 1 and puntos == 0:
+        t = t.replace(',', '')
+    elif puntos > 0 and comas > 0:
+        if t.rfind('.') > t.rfind(','):
+            t = t.replace(',', '')
+        else:
+            t = t.replace('.', '').replace(',', '.')
+    elif puntos == 1:
+        partes = t.split('.')
+        if len(partes[1]) == 3:
+            t = t.replace('.', '')
+    elif comas == 1:
+        partes = t.split(',')
+        if len(partes[1]) == 3:
+            t = t.replace(',', '')
+        else:
+            t = t.replace(',', '.')
+    try:
+        f = float(t)
+    except ValueError:
+        return None
+    return int(f) if f.is_integer() else f
+
+
+def _contexto_analizado(titulo, texto, entidad, alias):
+    """Fragmento del texto que menciona la entidad o alguno de sus alias (igual criterio que Grill)."""
+    def limpio(t):
+        return re.sub(r'https?://\S+', ' ', str(t or '')).strip()
+    objetivos = [nz(x) for x in [entidad] + list(alias or []) if x and len(str(x)) > 2]
+    oraciones = [x.strip() for x in re.split(r'(?<=[.!?\n])\s+', limpio(texto)) if x.strip()]
+    bloques = []
+    for i, o in enumerate(oraciones):
+        if any(obj and obj in nz(o) for obj in objetivos):
+            bloque = o
+            if len(o.split()) < 10 and i + 1 < len(oraciones):
+                bloque = '%s %s' % (o, oraciones[i + 1].strip())
+            bloques.append(bloque)
+        if sum(len(b) for b in bloques) > 700:
+            break
+    t = limpio(titulo)
+    if not bloques and t and any(obj and obj in nz(t) for obj in objetivos):
+        bloques = [t]
+    return (' '.join(bloques)[:700] or '-') if bloques else '-'
+
+
+def construir_xlsx(cfg, header, datos, grupos, mapa, etiquetas, temas, bitacora):
+    """UNA sola hoja 'Resultado', con el mismo motor y formato que exporta Grill-API.
+
+    xlsxwriter en modo streaming, encabezado en negrita, hipervínculos reales (los de Link Nota y
+    Link (Streaming - Imagen) en negro sin subrayar, como Grill), fechas DD/MM/YYYY, miles y moneda
+    con su formato e IDs como enteros puros. Sin hojas auxiliares.
+    """
+    cols = list(header) + ['Fila original', 'Grupo de similitud', 'Contexto analizado',
+                           'Tono_IA', 'Tema_IA', 'Subtema_IA', 'Criterio del tono']
+    buf = io.BytesIO()
+    wb = xlsxwriter.Workbook(buf, {'constant_memory': True, 'strings_to_urls': False,
+                                   'nan_inf_to_errors': False})
+    ws = wb.add_worksheet('Resultado')
+    fmt_header = wb.add_format({'bold': True})
+    fmt_link = wb.add_format({'font_color': '#0563C1', 'underline': 1, 'align': 'left'})
+    fmt_plain = wb.add_format({'font_color': '#000000', 'underline': False, 'align': 'left'})
+    fmt_date = wb.add_format({'num_format': 'DD/MM/YYYY'})
+    fmt_currency = wb.add_format({'num_format': '$#,##0'})
+    fmt_thousands = wb.add_format({'num_format': '#,##0'})
+    fmt_id = wb.add_format({'num_format': '0'})
+    for i, c in enumerate(cols):
+        if c in COLS_ANCHO_55:
+            ws.set_column(i, i, 55)
+        elif c in HYPERLINK_LIKE or str(c).lower().startswith('link'):
+            ws.set_column(i, i, 15)
+        elif c in ('Tema_IA', 'Subtema_IA'):
+            ws.set_column(i, i, 28)
+        elif c == 'Criterio del tono':
+            ws.set_column(i, i, 30)
+        elif c in ('Tono_IA', 'Grupo de similitud', 'Fila original'):
+            ws.set_column(i, i, 14)
+        else:
+            ws.set_column(i, i, 20)
+        ws.write(0, i, c, fmt_header)
+
+    crit = {'Positivo': 'Favorable a %s (obra, logro o declaración)' % cfg['entidad'],
+            'Negativo': 'Crítica o señalamiento dirigido a %s' % cfg['entidad'],
+            'Neutro': 'Sin logro ni crítica dirigida a %s' % cfg['entidad']}
+    for fila, r in enumerate(datos):
+        gid = mapa.get(str(r.get('_id')))
+        e = etiquetas.get(gid, {}) or {}
+        tono = e.get('tono', '')
+        ctx = _contexto_analizado(r.get('titulo', ''), r.get('texto', ''),
+                                  cfg.get('entidad', ''), cfg.get('alias') or [])
+        valores = [ctrl(v) for v in r['_fila']] + [r['_fila_n'], gid, ctx, tono, temas.get(gid, ''),
+                                                  e.get('sub_tema', ''), crit.get(tono, '')]
+        for cidx, h in enumerate(cols):
+            val = valores[cidx] if cidx < len(valores) else None
+            url = None
+            if isinstance(val, str) and val.strip().lower().startswith('http'):
+                url, cv = val.strip(), 'Link'
+            elif h == 'Fecha' and val not in (None, ''):
+                f = pd.to_datetime(str(val), dayfirst=True, errors='coerce')
+                cv = str(val) if pd.isna(f) else f.to_pydatetime()
+            elif h in ID_COLS:
+                num = _numero(str(val).replace('.', '')) if val not in (None, '') else None
+                cv = int(num) if isinstance(num, (int, float)) else (val if val not in (None, '') else None)
+            elif h in THOUSANDS_COLS or h in CURRENCY_COLS:
+                num = _numero(val)
+                cv = num if num is not None else val
+            else:
+                cv = val
+
+            r_excel = fila + 1
+            if url:
+                fmt = fmt_plain if h in HYPERLINK_LIKE else fmt_link
+                ws.write_url(r_excel, cidx, url, fmt, string=str(cv or 'Link'))
+            elif cv is None or cv == '':
+                ws.write_blank(r_excel, cidx, None)
+            elif h == 'Fecha' and isinstance(cv, datetime.datetime):
+                ws.write_datetime(r_excel, cidx, cv, fmt_date)
+            elif h in ID_COLS and isinstance(cv, int):
+                ws.write_number(r_excel, cidx, cv, fmt_id)
+            elif h in CURRENCY_COLS and isinstance(cv, (int, float)):
+                ws.write_number(r_excel, cidx, cv, fmt_currency)
+            elif h in THOUSANDS_COLS and isinstance(cv, (int, float)):
+                ws.write_number(r_excel, cidx, cv, fmt_thousands)
+            elif isinstance(cv, (int, float)) and not isinstance(cv, bool):
+                ws.write(r_excel, cidx, cv)
+            else:
+                ws.write(r_excel, cidx, str(cv))
+    wb.close()
+    return buf
 
 
 def detectar(header, candidatos, obligatorio=False):

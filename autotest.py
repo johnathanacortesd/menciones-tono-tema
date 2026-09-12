@@ -182,14 +182,15 @@ def main():
     print('\n5. XLSX de salida')
     out = app.construir_xlsx(cfg, hdr, filas, grupos, mapa, etiquetas, temas, bitacora)
     wb = load_workbook(io.BytesIO(out.getvalue()), read_only=True, data_only=True)
-    check('4 hojas esperadas', wb.sheetnames == ['Menciones', 'Temas (agrupa Sub-temas)', 'Grupos', 'Resumen'],
+    check('una sola hoja, llamada Resultado (igual que Grill)', wb.sheetnames == ['Resultado'],
           str(wb.sheetnames))
-    rows = list(wb['Menciones'].iter_rows(values_only=True))
+    rows = list(wb['Resultado'].iter_rows(values_only=True))
     H, D = list(rows[0]), rows[1:]
-    i_g, i_t, i_tem, i_sub = len(H) - 5, len(H) - 4, len(H) - 3, len(H) - 2
+    i_g, i_t, i_tem, i_sub = len(H) - 6, len(H) - 4, len(H) - 3, len(H) - 2
     check('una fila por mención', len(D) == 7, str(len(D)))
-    check('columnas nuevas al final', H[-6:] == ['Fila original', 'Grupo de similitud', 'Tono', 'Tema',
-                                                 'Sub-tema', 'Criterio del tono'], str(H[-6:]))
+    check('columnas nuevas al final, con los nombres de Grill',
+          H[-7:] == ['Fila original', 'Grupo de similitud', 'Contexto analizado', 'Tono_IA',
+                     'Tema_IA', 'Subtema_IA', 'Criterio del tono'], str(H[-7:]))
     byg = collections.defaultdict(set)
     for r in D:
         byg[r[i_g]].add((r[i_t], r[i_tem], r[i_sub]))
@@ -198,6 +199,29 @@ def main():
     check('sin "Otros" en la columna Tema', not any(app.nz(r[i_tem]) == 'otros' for r in D))
     check('sub-temas de 3 a 7 palabras', all(3 <= len(str(r[i_sub]).split()) <= 7 for r in D),
           str([r[i_sub] for r in D if not 3 <= len(str(r[i_sub]).split()) <= 7]))
+
+    print('\n5b. el export usa el mismo motor y formato que Grill-API')
+    src_x = open('app.py', encoding='utf-8').read()
+    _f_export = src_x.split('def construir_xlsx')[1].split('\ndef ')[0]
+    check('exporta con xlsxwriter en streaming (no openpyxl)', 'xlsxwriter.Workbook' in _f_export)
+    check('escribe una sola hoja llamada Resultado', _f_export.count('add_worksheet') == 1
+          and "add_worksheet('Resultado')" in _f_export)
+    check('no quedan hojas auxiliares', 'create_sheet' not in src_x)
+    check('encabezado en negrita y sin relleno de color',
+          "fmt_header = wb.add_format({'bold': True})" in _f_export and 'PatternFill' not in _f_export)
+    check('links como hipervínculos reales y los de Link Nota en negro sin subrayar',
+          'ws.write_url(' in _f_export and 'HYPERLINK_LIKE' in _f_export
+          and "font_color': '#000000', 'underline': False" in _f_export)
+    check('formatos de fecha, miles, moneda e ID como Grill',
+          all(k in _f_export for k in ("'num_format': 'DD/MM/YYYY'", "'num_format': '#,##0'",
+                                       "'num_format': '$#,##0'", "'num_format': '0'")))
+    check('anchos por columna como Grill (55 título, 15 links, 30 tema)',
+          all(k in _f_export for k in ('COLS_ANCHO_55', 'ws.set_column(i, i, 55)',
+                                       'ws.set_column(i, i, 15)', 'ws.set_column(i, i, 30)')))
+    check('convierte números con coma decimal y deja pasar el texto',
+          app._numero('1.234') == 1234 and app._numero('12,5') == 12.5
+          and app._numero('$ 1.500.000') == 1500000 and app._numero('') is None
+          and app._numero('abc') is None and app._numero('-') is None)
 
     print('\n6. contraseña de acceso')
     check('lee app_password de [general]',
@@ -275,6 +299,32 @@ def main():
     check('los grupos sin cubo se resuelven por API y con respaldo determinista',
           'cubo_de_respaldo' in src and "origen[q['grupo']] = 'llm'" in src)
     check('el clasificador de cubos recibe el texto de la nota', 'TEXTO: %s' in src)
+
+    print('\n12. integridad frente a la versión anterior (nada se perdió al editar)')
+    import ast as _ast
+    import subprocess as _sp
+
+    def _inv(src):
+        t = _ast.parse(src)
+        f = {n.name for n in t.body if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))}
+        c = {x.id for n in t.body if isinstance(n, _ast.Assign)
+             for x in n.targets if isinstance(x, _ast.Name)}
+        return f, c
+
+    try:
+        _prev = _sp.run(['git', 'show', 'HEAD:app.py'], capture_output=True, text=True,
+                        encoding='utf-8', cwd='.').stdout
+    except Exception:
+        _prev = ''
+    if _prev:
+        _fp, _cp = _inv(_prev)
+        _fn, _cn = _inv(open('app.py', encoding='utf-8').read())
+        faltan_f = sorted(_fp - _fn)
+        faltan_c = sorted(_cp - _cn)
+        check('no se perdió ninguna función de nivel superior', not faltan_f, str(faltan_f))
+        check('no se perdió ninguna constante de nivel superior', not faltan_c, str(faltan_c))
+    else:
+        print('  (sin git: se omite)')
 
     print('\n7. reglas que no pueden desaparecer')
     for nombre, txt in app.CRITERIOS_TONO.items():
