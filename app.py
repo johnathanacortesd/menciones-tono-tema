@@ -51,6 +51,7 @@ Requisitos: streamlit, openpyxl, pandas, requests, rapidfuzz, numpy.
 import collections
 from collections.abc import Mapping
 import hashlib
+import html
 import hmac
 import io
 import json
@@ -1949,11 +1950,17 @@ def exigir_password():
         return True
     if st.session_state.get('_auth_ok'):
         return True
-    st.title('📰 Tono, Tema y Sub-tema de menciones')
-    st.caption('Acceso restringido. Ingresa la contraseña para usar la aplicación.')
-    with st.form('_login'):
-        pw = st.text_input('Contraseña', type='password', key='_pw_input')
-        entrar = st.form_submit_button('Entrar', type='primary')
+    st.markdown("""
+    <div class="auth-wrap">
+        <div class="auth-icon">◈</div>
+        <div class="auth-title">Tono, Tema y Sub-tema de Menciones</div>
+        <div class="auth-sub">Ingresa tus credenciales para continuar</div>
+    </div>""", unsafe_allow_html=True)
+    _, col, _ = st.columns([1, 2, 1])
+    with col:
+        with st.form('_login'):
+            pw = st.text_input('Contraseña', type='password', key='_pw_input')
+            entrar = st.form_submit_button('Entrar', use_container_width=True, type='primary')
     if entrar:
         if coincide_password(pw, esperada):
             st.session_state['_auth_ok'] = True
@@ -1983,208 +1990,268 @@ def aviso_sin_password():
                    'Secrets (o en .streamlit/secrets.toml) para restringir el acceso.')
 
 
-def main():
-    exigir_password()
-    aviso_sin_password()
-    st.title('📰 Tono, Tema y Sub-tema de menciones')
-    st.caption('Sube el export de monitoreo, indica la marca y sus voceros, y descarga el XLSX '
-               'con Tono, Tema y Sub-tema por mención. Los grupos de notas iguales comparten etiqueta.')
+THEME_LIGHT_VARS = """
+:root,[data-testid="stApp"]{
+    --bg:#f8f9fa;--s1:#ffffff;--s2:#f1f3f4;--s3:#e8eaed;
+    --border:#dadce0;--border2:#bdc1c6;--border-focus:#f97316;
+    --text:#202124;--text2:#3c4043;--text3:#5f6368;--text4:#9aa0a6;
+    --accent:#f97316;--accent2:#ea580c;--accent3:#c2410c;
+    --accent-bg:#fff7ed;--accent-bg2:#ffedd5;--accent-bdr:#fed7aa;
+    --green:#059669;--green2:#047857;--green-bg:#ecfdf5;--green-bdr:#a7f3d0;
+    --red:#dc2626;--amber:#d97706;--blue:#1a73e8;
+    --success-bg:linear-gradient(135deg,#ecfdf5,#d1fae5);
+    --success-title:#047857;
+    --icon-dossier-bg:#fff7ed;
+    --r:8px;--r2:12px;--r3:16px;--r4:20px;
+    --shadow-sm:0 1px 2px rgba(60,64,67,0.1),0 1px 3px rgba(60,64,67,0.08);
+    --shadow-md:0 1px 3px rgba(60,64,67,0.12),0 4px 8px rgba(60,64,67,0.08);
+    --shadow-lg:0 2px 6px rgba(60,64,67,0.1),0 8px 24px rgba(60,64,67,0.1);
+    --transition:all 0.2s cubic-bezier(0.4,0,0.2,1);
+}
+"""
 
-    with st.sidebar:
-        _sec = leer_secrets()
-        st.header('1. Cliente')
-        entidad = st.text_input('Entidad / marca / persona', '')
-        voceros = st.text_input('Vocero(s), separados por coma', '')
-        alias = st.text_area('Alias y formas de nombrarla en los medios (coma o línea por alias)',
-                             '', height=90,
-                             help='Ej: Fenavi, Federación Nacional de Avicultores, el gremio avicultor, '
-                                  'la avicultura colombiana')
-        criterio = st.radio('Criterio del tono', list(CRITERIOS_TONO.keys()),
-                            index=list(CRITERIOS_TONO.keys()).index(_sec['criterio'])
-                            if _sec.get('criterio') in CRITERIOS_TONO else 0)
+THEME_DARK_VARS = """
+:root,[data-testid="stApp"]{
+    --bg:#121418;--s1:#1c1f26;--s2:#252830;--s3:#2e333c;
+    --border:#3d4450;--border2:#5c6370;--border-focus:#f97316;
+    --text:#e8eaed;--text2:#c5c8ce;--text3:#9aa0a6;--text4:#6e7480;
+    --accent:#f97316;--accent2:#fb923c;--accent3:#fdba74;
+    --accent-bg:#2a1c10;--accent-bg2:#3d2814;--accent-bdr:#9a5b28;
+    --green:#34d399;--green2:#6ee7b7;--green-bg:#0f291e;--green-bdr:#065f46;
+    --red:#f87171;--amber:#fbbf24;--blue:#60a5fa;
+    --success-bg:linear-gradient(135deg,#0f291e,#134e3a);
+    --success-title:#6ee7b7;
+    --icon-dossier-bg:#2a1c10;
+    --r:8px;--r2:12px;--r3:16px;--r4:20px;
+    --shadow-sm:0 1px 2px rgba(0,0,0,0.4),0 1px 3px rgba(0,0,0,0.25);
+    --shadow-md:0 1px 3px rgba(0,0,0,0.45),0 4px 8px rgba(0,0,0,0.3);
+    --shadow-lg:0 2px 6px rgba(0,0,0,0.4),0 8px 24px rgba(0,0,0,0.35);
+    --transition:all 0.2s cubic-bezier(0.4,0,0.2,1);
+}
+"""
 
-        st.header('2. Modelo')
-        _prov = _sec.get('proveedor') if _sec.get('proveedor') in PROVEEDORES else list(PROVEEDORES)[0]
-        proveedor = st.selectbox('Proveedor', list(PROVEEDORES.keys()), index=list(PROVEEDORES).index(_prov))
-        base_def, modelo_def = PROVEEDORES[proveedor]
-        base_url = st.text_input('base_url', _sec.get('base_url') or base_def)
-        modelo = st.text_input('Modelo', _sec.get('modelo') or modelo_def)
-        clave_secrets = _sec.get('api_key', '')
-        if clave_secrets:
-            # La key vive SOLO en el servidor: nunca se pasa como valor de un widget, porque
-            # entonces viaja al navegador y se puede leer con las herramientas del desarrollador.
-            api_key = clave_secrets
-            st.caption('🔒 API key cargada desde los Secrets. No se muestra ni se envía al navegador.')
-            with st.expander('Usar otra API key solo en esta sesión'):
-                tmp = st.text_input('API key temporal', value='', type='password',
-                                    help='No se guarda: vive solo en esta pestaña del navegador.')
-                if tmp.strip():
-                    api_key = tmp.strip()
-                    st.caption('Usando la key temporal de esta sesión.')
+def _default_theme() -> str:
+    try:
+        theme_obj = getattr(getattr(st, "context", None), "theme", None)
+        theme_type = getattr(theme_obj, "type", None)
+        if theme_type in ("dark", "light"):
+            return theme_type
+    except Exception:
+        pass
+    return "light"
+
+def current_ui_theme() -> str:
+    theme = st.session_state.get("ui_theme")
+    if theme in ("dark", "light"):
+        return theme
+    return _default_theme()
+
+def load_custom_css():
+    theme_vars = THEME_DARK_VARS if current_ui_theme() == "dark" else THEME_LIGHT_VARS
+    st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Text:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+""" + theme_vars + """
+html,body,[data-testid="stApp"]{
+    background:var(--bg)!important;color:var(--text)!important;
+    font-family:'Google Sans Text','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    font-size:14px;-webkit-font-smoothing:antialiased;letter-spacing:0.01em;
+}
+#MainMenu,footer,header{visibility:hidden}.stDeployButton{display:none}
+.block-container{padding-top:1rem!important;padding-bottom:0!important}
+[data-testid="stAppViewBlockContainer"]{padding-top:1rem!important}
+.app-header{background:var(--s1);border:1px solid var(--border);border-radius:var(--r3);padding:1rem 1.5rem;margin-bottom:1rem;display:flex;align-items:center;gap:1rem;box-shadow:var(--shadow-sm);position:relative;overflow:hidden;}
+.app-header::after{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#f97316,#fb923c,#fdba74);}
+.app-header-icon{width:40px;height:40px;background:linear-gradient(135deg,#f97316,#ea580c);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:white;flex-shrink:0;box-shadow:0 2px 8px rgba(249,115,22,0.3);}
+.app-header-text{flex:1}
+.app-header-title{font-family:'Google Sans',sans-serif;font-size:1.25rem;font-weight:700;color:var(--text);letter-spacing:-0.01em;line-height:1.3}
+.app-header-version{font-family:'Roboto Mono',monospace;font-size:0.65rem;color:var(--text3);letter-spacing:0.03em;margin-top:0.15rem}
+.app-header-badge{background:var(--accent-bg);border:1px solid var(--accent-bdr);color:var(--accent2);font-family:'Roboto Mono',monospace;font-size:0.6rem;font-weight:500;padding:0.25rem 0.75rem;border-radius:100px;letter-spacing:0.04em;text-transform:uppercase;white-space:nowrap;}
+.metrics-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0.6rem;margin:0.8rem 0}
+.metric-card{background:var(--s1);border:1px solid var(--border);border-radius:var(--r2);padding:0.8rem 0.6rem;text-align:center;transition:var(--transition);box-shadow:var(--shadow-sm);position:relative;overflow:hidden;}
+.metric-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:var(--r2) var(--r2) 0 0}
+.metric-card.m-total::before{background:linear-gradient(90deg,#5f6368,#9aa0a6)}
+.metric-card.m-unique::before{background:linear-gradient(90deg,#059669,#34d399)}
+.metric-card.m-dup::before{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
+.metric-card.m-time::before{background:linear-gradient(90deg,#1a73e8,#4285f4)}
+.metric-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg)}
+.metric-val{font-family:'Google Sans',sans-serif;font-size:1.5rem;font-weight:700;line-height:1;margin-bottom:0.3rem;letter-spacing:-0.01em}
+.metric-lbl{font-family:'Roboto Mono',monospace;font-size:0.62rem;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;font-weight:500}
+[data-testid="stForm"]{background:var(--s1)!important;border:1px solid var(--border)!important;border-radius:var(--r3)!important;padding:1.2rem 1.5rem!important;box-shadow:var(--shadow-md)!important;}
+.sec-label{font-family:'Google Sans',sans-serif;font-size:0.72rem;font-weight:700;color:var(--text2);letter-spacing:0.08em;text-transform:uppercase;padding-bottom:0.3rem;border-bottom:2px solid var(--s3);margin:0.8rem 0 0.5rem;display:flex;align-items:center;gap:0.5rem;}
+.sec-label::before{content:'';display:inline-block;width:3px;height:12px;background:linear-gradient(180deg,#f97316,#ea580c);border-radius:2px}
+.upload-zone{display:grid;grid-template-columns:1fr;gap:0.6rem;margin:0.3rem 0}
+.upload-zone-card{background:var(--s1);border:1.5px dashed var(--border);border-radius:var(--r2);padding:0.6rem 0.8rem;display:flex;align-items:center;gap:0.6rem;transition:var(--transition);}
+.upload-zone-card:hover{border-color:var(--accent);border-style:solid;transform:translateY(-1px);box-shadow:var(--shadow-md)}
+.upload-zone-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0;}
+.upload-zone-icon.uz-dossier{background:var(--icon-dossier-bg);color:#f97316}
+.upload-zone-icon.uz-pkl{background:var(--accent-bg);color:var(--accent2)}
+.upload-zone-text{flex:1;min-width:0}
+.upload-zone-title{font-family:'Google Sans',sans-serif;font-size:0.82rem;font-weight:700;color:var(--text);line-height:1.2}
+.upload-zone-desc{font-size:0.7rem;color:var(--text3);line-height:1.3}
+[data-testid="stFileUploader"]{background:var(--s1)!important;border:1.5px dashed var(--border)!important;border-radius:var(--r)!important;padding:0.4rem 0.6rem!important;transition:var(--transition)!important;min-height:auto!important;}
+[data-testid="stFileUploader"]:hover{border-color:var(--accent)!important;border-style:solid!important;background:var(--accent-bg)!important;}
+[data-testid="stFileUploader"] section{padding:0.2rem!important}
+[data-testid="stFileUploader"] section>div{font-size:0.78rem!important;color:var(--text2)!important}
+[data-testid="stFileUploader"] section small{font-size:0.7rem!important;color:var(--text3)!important}
+[data-testid="stFileUploader"] button{background:var(--accent-bg)!important;border:1px solid var(--accent-bdr)!important;color:var(--accent2)!important;font-weight:500!important;font-size:0.75rem!important;border-radius:100px!important;padding:0.25rem 0.8rem!important;font-family:'Google Sans',sans-serif!important;transition:var(--transition)!important;}
+[data-testid="stFileUploader"] button:hover{background:var(--accent)!important;color:white!important;border-color:var(--accent)!important}
+[data-testid="stTextInput"] input{background:var(--s1)!important;border:1.5px solid var(--border)!important;color:var(--text)!important;border-radius:var(--r)!important;font-family:'Google Sans Text',sans-serif!important;font-size:0.9rem!important;padding:0.5rem 0.75rem!important;transition:var(--transition)!important;}
+[data-testid="stTextInput"] input:focus{border-color:var(--accent)!important;box-shadow:0 0 0 3px rgba(249,115,22,0.12)!important;}
+label[data-testid="stWidgetLabel"] p{font-family:'Google Sans',sans-serif!important;color:var(--text2)!important;font-size:0.82rem!important;font-weight:500!important;margin-bottom:0.15rem!important;}
+.stButton>button,[data-testid="stDownloadButton"]>button{background:var(--s1)!important;border:1.5px solid var(--border)!important;color:var(--text)!important;border-radius:100px!important;font-family:'Google Sans',sans-serif!important;font-weight:500!important;font-size:0.88rem!important;transition:var(--transition)!important;padding:0.5rem 1.2rem!important;box-shadow:none!important;}
+.stButton>button:hover,[data-testid="stDownloadButton"]>button:hover{border-color:var(--accent)!important;color:var(--accent2)!important;background:var(--accent-bg)!important;box-shadow:var(--shadow-sm)!important;transform:translateY(-1px)!important;}
+.stButton>button[kind="primary"],[data-testid="stDownloadButton"]>button[kind="primary"]{background:var(--accent)!important;border:none!important;color:#fff!important;font-weight:500!important;font-size:0.92rem!important;padding:0.6rem 1.5rem!important;box-shadow:0 1px 3px rgba(249,115,22,0.3),0 4px 12px rgba(249,115,22,0.15)!important;letter-spacing:0.01em!important;}
+.stButton>button[kind="primary"]:hover,[data-testid="stDownloadButton"]>button[kind="primary"]:hover{background:var(--accent2)!important;box-shadow:0 2px 6px rgba(234,88,12,0.35),0 8px 24px rgba(234,88,12,0.18)!important;transform:translateY(-1px)!important;color:#fff!important;}
+.success-banner{background:var(--success-bg);border:1px solid var(--green-bdr);border-left:4px solid var(--green);border-radius:var(--r2);padding:0.8rem 1.2rem;margin:0.5rem 0 0.8rem;display:flex;align-items:center;gap:0.8rem;}
+.success-icon{width:34px;height:34px;background:linear-gradient(135deg,#059669,#047857);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:1rem;flex-shrink:0;}
+.success-title{font-family:'Google Sans',sans-serif;font-size:1rem;font-weight:700;color:var(--success-title);margin-bottom:0.1rem}
+.success-sub{font-size:0.8rem;color:var(--text2)}
+.auth-wrap{max-width:380px;margin:8vh auto 0;text-align:center}
+.auth-icon{width:60px;height:60px;background:linear-gradient(135deg,#f97316,#ea580c);border-radius:16px;display:inline-flex;align-items:center;justify-content:center;font-size:1.6rem;color:white;margin-bottom:1rem;box-shadow:0 4px 166px rgba(249,115,22,0.3);}
+.auth-title{font-family:'Google Sans',sans-serif;font-size:1.5rem;font-weight:700;color:var(--text);margin-bottom:0.3rem}
+.auth-sub{font-size:0.85rem;color:var(--text3);margin-bottom:2rem}
+[data-testid="stProgressBar"]>div>div{background:linear-gradient(90deg,#f97316,#fb923c,#fdba74)!important;border-radius:100px!important;height:5px!important;}
+[data-testid="stDataFrame"]{border:1px solid var(--border)!important;border-radius:var(--r2)!important;box-shadow:var(--shadow-sm)!important;overflow:hidden!important;}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--s2);border-radius:3px}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--accent)}
+.footer{font-family:'Roboto Mono',monospace;font-size:0.6rem;color:var(--text4);text-align:center;padding:0.8rem 0 0.5rem;letter-spacing:0.04em;border-top:1px solid var(--s3);margin-top:1rem;}
+.stElementContainer{margin-bottom:0!important}
+[data-testid="stVerticalBlock"]>div{gap:0.3rem!important}
+[data-testid="stHorizontalBlock"]>div{gap:0.4rem!important}
+hr{border-color:var(--s3)!important;margin:0.5rem 0!important}
+.config-badge{display:inline-flex;align-items:center;gap:0.4rem;background:var(--s2);border:1px solid var(--border);border-radius:100px;padding:0.2rem 0.7rem;font-family:'Roboto Mono',monospace;font-size:0.62rem;color:var(--text3);margin-bottom:0.6rem;}
+.live-panel{background:var(--s1);border:1px solid var(--border);border-radius:var(--r3);padding:1rem 1.2rem;margin:0.4rem 0 0.8rem;box-shadow:var(--shadow-md);position:relative;overflow:hidden;}
+.live-panel::after{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#f97316,#fb923c,#fdba74);}
+.live-head{display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;}
+.live-pulse{width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 0 rgba(249,115,22,0.6);animation:livePulse 1.4s ease-out infinite;flex-shrink:0;}
+@keyframes livePulse{0%{box-shadow:0 0 0 0 rgba(249,115,22,0.55)}70%{box-shadow:0 0 0 12px rgba(249,115,22,0)}100%{box-shadow:0 0 0 0 rgba(249,115,22,0)}}
+.live-title{font-family:'Google Sans',sans-serif;font-size:1.02rem;font-weight:700;color:var(--text);line-height:1.2}
+.live-sub{font-size:0.78rem;color:var(--text3);margin-top:0.15rem}
+.live-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin:0.4rem 0 0.7rem}
+.live-metric{background:var(--s2);border:1px solid var(--border);border-radius:var(--r);padding:0.55rem 0.5rem;text-align:center}
+.live-metric-val{font-family:'Google Sans',sans-serif;font-size:1.15rem;font-weight:700;color:var(--accent2);line-height:1.1}
+.live-metric-lbl{font-family:'Roboto Mono',monospace;font-size:0.58rem;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;margin-top:0.2rem}
+.step-list{display:flex;flex-direction:column;gap:0.28rem;margin:0.2rem 0 0.6rem}
+.step-item{display:flex;align-items:center;gap:0.5rem;font-size:0.8rem;color:var(--text3);padding:0.22rem 0.15rem}
+.step-item .dot{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:0.65rem;flex-shrink:0;background:var(--s1)}
+.step-item.is-done{color:var(--green2);font-weight:500}
+.step-item.is-done .dot{background:var(--green);border-color:var(--green);color:#fff}
+.step-item.is-active{color:var(--accent2);font-weight:700}
+.step-item.is-active .dot{border-color:var(--accent);background:var(--accent-bg);color:var(--accent2);animation:livePulse 1.4s ease-out infinite}
+.live-hint{background:var(--accent-bg);border:1px solid var(--accent-bdr);color:var(--accent3);border-radius:var(--r);padding:0.55rem 0.75rem;font-size:0.78rem;line-height:1.35}
+.live-detail{font-size:0.8rem;color:var(--text2);margin-top:0.45rem;font-family:'Google Sans Text',sans-serif}
+.theme-bar{display:flex;justify-content:flex-end;align-items:center;margin:0 0 0.6rem;gap:0.4rem}
+.theme-bar .stButton>button{padding:0.35rem 0.85rem!important;font-size:0.78rem!important}
+.pkl-hint{font-size:0.78rem;color:var(--text3);margin:0.15rem 0 0.55rem;line-height:1.35}
+div[data-testid="stAlert"]{border-radius:var(--r2)!important}
+[data-testid="stCheckbox"] p,[data-testid="stToggle"] p{color:var(--text2)!important}
+[data-baseweb="select"]>div,[data-baseweb="input"]{background:var(--s1)!important;color:var(--text)!important}
+.stMarkdown,.stCaption{color:var(--text2)}
+@media(max-width:768px){
+    .metrics-grid{grid-template-columns:repeat(2,1fr)}
+    .live-metrics{grid-template-columns:1fr 1fr 1fr}
+    .app-header{flex-direction:column;text-align:center;gap:0.5rem;padding:1rem}
+}
+</style>
+""", unsafe_allow_html=True)
+
+def _on_theme_toggle():
+    st.session_state["ui_theme"] = "dark" if st.session_state.get("theme_toggle") else "light"
+
+def render_theme_toggle():
+    if "ui_theme" not in st.session_state:
+        st.session_state["ui_theme"] = _default_theme()
+    if "theme_toggle" not in st.session_state:
+        st.session_state["theme_toggle"] = st.session_state["ui_theme"] == "dark"
+    _, col_theme = st.columns([6, 1])
+    with col_theme:
+        st.toggle(
+            "Modo oscuro",
+            key="theme_toggle",
+            on_change=_on_theme_toggle,
+            help="Cambia entre tema claro y oscuro. El naranja de marca se conserva.",
+        )
+
+# ======================================
+# Autenticación Básica
+# ======================================
+
+PIPELINE_STEPS = [
+    ("read", "Leer el Excel"),
+    ("group", "Agrupar notas iguales"),
+    ("ai", "Análisis IA (Tono y Sub-tema)"),
+    ("themes", "Temas a partir del archivo"),
+    ("export", "Generar archivo de resultado"),
+]
+
+def _fmt_elapsed(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds} s"
+    return f"{seconds // 60} min {seconds % 60:02d} s"
+
+def _fmt_size(n_bytes: int) -> str:
+    if not n_bytes: return ""
+    mb = n_bytes / (1024 * 1024)
+    if mb < 0.1: return f"{n_bytes / 1024:.0f} KB"
+    return f"{mb:.1f} MB"
+
+def _active_step(pct: int, msg: str) -> str:
+    m = (msg or "").lower()
+    if pct >= 100 or "listo" in m or "completad" in m:
+        return "done"
+    if pct >= 95 or "archivo de resultado" in m or "generando" in m:
+        return "export"
+    if pct >= 82 or "tema" in m:
+        return "themes"
+    if pct >= 22 or "analizando" in m or "ia" in m:
+        return "ai"
+    if pct >= 12 or "agrupando" in m:
+        return "group"
+    return "read"
+
+def _render_live_html(pct, msg, elapsed, file_label, active_key):
+    steps_html = []
+    reached_active = False
+    for key, label in PIPELINE_STEPS:
+        if active_key == "done":
+            cls, mark = "is-done", "✓"
+        elif key == active_key:
+            cls, mark = "is-active", "●"
+            reached_active = True
+        elif not reached_active:
+            cls, mark = "is-done", "✓"
         else:
-            api_key = st.text_input('API key', value='', type='password',
-                                    help='No está en los Secrets: se escribe aquí y vive solo en esta '
-                                         'sesión. Recomendado: guárdala en los Secrets de Streamlit.')
-            if not api_key.strip():
-                st.caption('Sin API key: se usará la que escribas aquí (solo esta sesión).')
-
-        st.header('3. Agrupación y lotes')
-        umbral_titulo = st.slider('Umbral de similitud de titulares (%)', 75, 100,
-                                  UMBRAL_TITULO_POR_DEFECTO, 1,
-                                  help='Bájalo (p. ej. 85) para fusionar una misma campaña publicada por '
-                                       'muchos medios. Súbelo para separar notas parecidas pero distintas.')
-        umbral_cuerpo = st.slider('Umbral de similitud de cuerpos (%)', 70, 100,
-                                  UMBRAL_CUERPO_POR_DEFECTO, 1)
-        votos = st.slider('Verificaciones del tono por grupo', 1, 3, 2, 1,
-                          help='Cada grupo se etiqueta N veces y gana la mayoría; un empate cae a '
-                               'Neutro. Con 2 se reducen los vaivenes del modelo.')
-        tam_lote = st.slider('Grupos por llamada al modelo', 5, 30, 10, 1,
-                             help='Con modelos pequeños (gpt-4.1-nano) 10 funciona mejor; con mini se '
-                                  'puede subir a 15.')
-        max_rep = st.slider('Máximo de reparaciones por lote', 0, 3, 2, 1)
-
-        if st.session_state.get('_auth_ok'):
-            st.divider()
-            if st.button('Cerrar sesión'):
-                st.session_state['_auth_ok'] = False
-                st.session_state.pop('res', None)
-                st.rerun()
-
-    archivo = st.file_uploader('XLSX de menciones', type=['xlsx', 'xlsm'])
-    if not archivo:
-        st.info('Sube el archivo del período. Luego eliges las columnas y corres el análisis.')
-        with st.expander('Cómo funciona por dentro (y por qué acierta)'):
-            st.markdown(
-                '1. **Agrupación**: las notas iguales o casi iguales se etiquetan una sola vez.\n'
-                '2. **Sub-tema primero, tono después**: el resumen del hecho guía el juicio del tono.\n'
-                '3. **Validador + reparación**: 3-7 palabras, sin verbo al inicio, sin rótulos vacíos; '
-                'el modelo corrige lo que no pasa.\n'
-                '4. **Temas**: la lista de cubos se genera desde este mismo archivo y el LLM elige '
-                 'dentro de ella; lo que no case se resuelve por API.\n'
-                '5. **Sin "Otros"**: la descarga se bloquea si algún grupo queda sin cubo.')
-        return
-
-    datos = archivo.getvalue()
-    wb = load_workbook(io.BytesIO(datos), read_only=True)
-    hojas = wb.sheetnames
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        hoja = st.selectbox('Hoja', hojas)
-    wb2 = load_workbook(io.BytesIO(datos), read_only=True, data_only=True)
-    header = [ctrl(h) for h in next(wb2[hoja].iter_rows(values_only=True))]
-    with st.expander('Columnas del archivo', expanded=True):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            col_titulo = st.selectbox('Columna de título', header,
-                                      index=detectar(header, CAND_TITULO) or 0)
-        with c2:
-            col_texto = st.selectbox('Columna de texto completo', header,
-                                     index=detectar(header, CAND_TEXTO) or 0)
-        with c3:
-            i_id = detectar(header, CAND_ID)
-            col_id = st.selectbox('Columna de id', ['(usar número de fila)'] + list(header),
-                                  index=(i_id + 1) if i_id is not None else 0)
-        extras = st.multiselect('Columnas extra a conservar en la hoja de grupos',
-                                header, [h for h in ('Medio', 'Fecha', 'Tipo de Medio') if h in header])
-
-    listo = entidad.strip() and modelo.strip() and api_key.strip()
-    if not listo:
-        st.warning('Completa entidad, modelo y API key en la barra lateral para correr el análisis.')
-    correr = st.button('▶ Correr análisis', type='primary', disabled=not listo)
-
-    if correr:
-        cfg = {'entidad': entidad.strip(),
-               'voceros': [v.strip() for v in voceros.split(',') if v.strip()],
-               'alias': [a.strip() for a in re.split(r'[,\n]', alias) if a.strip()],
-               'criterio': criterio, 'proveedor': proveedor, 'base_url': base_url.strip(),
-               'modelo': modelo.strip(), 'api_key': api_key.strip(), 'timeout': 120,
-               'col_titulo': col_titulo, 'col_texto': col_texto}
-        idx = {h: j for j, h in enumerate(header)}
-        barra = st.progress(0.0, 'Leyendo el archivo...')
-        try:
-            hdr, filas, saltadas = extraer(datos, hoja, idx[col_titulo], idx[col_texto],
-                                           None if col_id.startswith('(') else idx[col_id],
-                                           [idx[e] for e in extras])
-            if not filas:
-                st.error('No hay filas con texto en la columna elegida.')
-                return
-            barra.progress(0.1, 'Agrupando notas iguales o similares...')
-            grupos, mapa = construir_grupos(filas, umbral_titulo, umbral_cuerpo)
-            st.session_state['resumen_grupos'] = (len(filas), len(grupos), saltadas,
-                                                 sum(1 for g in grupos if g['n'] > 1))
-            st.info('%d filas con texto (%d sin texto, ignoradas) → **%d grupos** '
-                    '(%d grupos con 2 o más menciones iguales).' %
-                    (len(filas), saltadas, len(grupos), sum(1 for g in grupos if g['n'] > 1)))
-
-            def prog(h, t, msg):
-                barra.progress(0.1 + 0.7 * h / max(1, t), msg)
-            etiquetas, bitacora = etiquetar_todo(cfg, grupos, prog, tam_lote=tam_lote,
-                                                 max_reparaciones=max_rep, votos=votos)
-            corregidos = aplicar_guarda_tono(grupos, etiquetas, cfg['entidad'], cfg['alias'])
-            st.session_state['corregidos_guarda'] = corregidos
-            if corregidos:
-                st.caption('Guarda del tono: %d Negativos sin señalamiento dirigido pasaron a Neutro.'
-                           % len(corregidos))
-            barra.progress(0.82, 'Generando la lista de Temas a partir del archivo...')
-            tax = proponer_taxonomia(cfg, grupos, etiquetas, objetivo=16,
-                                     progreso=lambda m: barra.progress(0.82, m))
-            barra.progress(0.88, 'Asignando Temas...')
-            temas, pendientes, origen = asignar_temas(cfg, grupos, etiquetas, tax, True)
-            canonizar_nuevos(temas, tax)
-            # Grupos sin cubo: se resuelven por API según el texto, sin pedirle nada al usuario.
-            for _ronda in range(2):
-                faltan = [q for q in pendientes if q['grupo'] not in temas]
-                if not faltan:
-                    break
-                elegidos = elegir_cubo(cfg, faltan, tax, True)
-                for q in faltan:
-                    if elegidos.get(q['grupo']):
-                        temas[q['grupo']] = elegidos[q['grupo']]
-                        origen[q['grupo']] = 'llm'
-            for g in grupos:                      # último recurso determinista: nunca queda vacío
-                if not temas.get(g['grupo']):
-                    temas[g['grupo']] = cubo_de_respaldo(
-                        etiquetas.get(g['grupo'], {}).get('sub_tema', ''), g['titulo'])
-                    origen[g['grupo']] = 'respaldo'
-            pendientes = []
-        except Exception as e:
-            msg = str(e)
-            st.error('Se interrumpió el análisis: %s' % msg[:400])
-            if '401' in msg or 'invalid_api_key' in msg.lower():
-                st.info('La API key fue rechazada. Verifícala en la barra lateral (y que corresponda '
-                        'al proveedor elegido).')
-            elif '404' in msg or 'model' in msg.lower():
-                st.info('Revisa el nombre del modelo y el base_url del proveedor.')
-            elif 'JSON' in msg or 'json' in msg:
-                st.info('El modelo devolvió algo que no es JSON: baja "Grupos por llamada al modelo" '
-                        'o usa un modelo más grande.')
-            else:
-                st.info('Si el error se repite, baja el tamaño de lote y vuelve a intentar.')
-            return
-        barra.progress(1.0, 'Listo')
-        st.session_state['res'] = {'cfg': cfg, 'header': header, 'filas': filas, 'grupos': grupos,
-                                   'mapa': mapa, 'etiquetas': etiquetas, 'temas': temas,
-                                   'pendientes': pendientes, 'bitacora': bitacora, 'origen': origen,
-                                   'tax': tax}
-
-    res = st.session_state.get('res')
-    if not res:
-        return
-    etiquetas, temas, grupos = res['etiquetas'], res['temas'], res['grupos']
-    cfg, tax = res['cfg'], res['tax']
-
-    faltan_tono = [g for g in grupos if not etiquetas.get(g['grupo'], {}).get('tono')]
-    if faltan_tono:
-        st.warning('%d grupo(s) quedaron sin tono (revisa la API key o el modelo). Puedes descargar '
-                   'igual.' % len(faltan_tono))
-    out = construir_xlsx(cfg, res['header'], res['filas'], grupos, res['mapa'], etiquetas, temas,
-                         res['bitacora'])
-    nombre = 'Menciones_%s_Tono_Tema_Subtemas.xlsx' % re.sub(r'[^A-Za-z0-9]+', '_',
-                                                             entidad.strip())[:40].strip('_')
-    st.success('Listo. %d grupos, %d temas, ningún grupo sin cubo.' % (len(grupos), len(set(temas.values()))))
-    st.download_button('⬇️ Descargar XLSX', out.getvalue(), file_name=nombre,
-                       mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
+            cls, mark = "", ""
+        steps_html.append(f'<div class="step-item {cls}"><span class="dot">{mark}</span>{label}</div>')
+        
+    file_line = f" · {html.escape(file_label)}" if file_label else ""
+    title = "Análisis completado" if active_key == "done" else "Analizando las menciones"
+    safe_msg = html.escape(str(msg or ""))
+    
+    return f"""
+    <div class="live-panel">
+      <div class="live-head">
+        <div class="live-pulse"></div>
+        <div>
+          <div class="live-title">{title}</div>
+          <div class="live-sub">El análisis sigue activo{file_line}. No cierres esta pestaña.</div>
+        </div>
+      </div>
+      <div class="live-metrics">
+        <div class="live-metric"><div class="live-metric-val">{int(pct)}%</div><div class="live-metric-lbl">Avance</div></div>
+        <div class="live-metric"><div class="live-metric-val">{elapsed}</div><div class="live-metric-lbl">Tiempo</div></div>
+        <div class="live-metric"><div class="live-metric-val">en curso</div><div class="live-metric-lbl">Estado</div></div>
+      </div>
+      <div class="step-list">{''.join(steps_html)}</div>
+      <div class="live-hint">Las notas iguales o casi iguales se etiquetan una sola vez, así que el análisis es más rápido y consistente.</div>
+      <div class="live-detail">{safe_msg}</div>
+    </div>
+    """
 
 # ============================================================================
 # Guarda determinista del tono: "el tema negativo no es tono negativo"
@@ -2222,7 +2289,7 @@ def _critica_dirigida(texto, brand, aliases):
 
 
 def aplicar_guarda_tono(grupos, etiquetas, brand, aliases):
-    """Baja a Neutro los Negativos que solo describen un hecho tragico, sin señalamiento dirigido."""
+    """Baja a Neutro los Negativos que solo describen un hecho trágico, sin señalamiento dirigido."""
     corregidos = []
     for g in grupos:
         e = etiquetas.get(g['grupo'])
@@ -2233,6 +2300,286 @@ def aplicar_guarda_tono(grupos, etiquetas, brand, aliases):
             e['tono'] = 'Neutro'
             corregidos.append(g['grupo'])
     return corregidos
+
+
+def idx_of(header, nombre):
+    """Índice de una columna por su nombre (el header puede traer duplicados)."""
+    return header.index(nombre) if nombre in header else None
+
+
+def run_analysis():
+    """Analiza el archivo que quedó pendiente, con el panel de progreso de la interfaz de Grill."""
+    pend = st.session_state.get('pending_analisis') or {}
+    cfg, datos = pend['cfg'], pend['datos']
+    panel = st.empty()
+    t0 = time.time()
+
+    def pintar(pct, msg):
+        panel.markdown(_render_live_html(int(pct), msg, _fmt_elapsed(time.time() - t0),
+                                         pend.get('nombre', ''), _active_step(int(pct), msg)),
+                       unsafe_allow_html=True)
+
+    def prog(h, t_, msg):
+        pintar(12 + 68 * (h / max(1, t_)), msg)
+
+    try:
+        pintar(3, 'Leyendo el Excel…')
+        hdr, filas, saltadas = extraer(datos, pend['hoja'], pend['col_titulo'], pend['col_texto'],
+                                       pend['col_id'], pend['extras'])
+        if not filas:
+            st.session_state['pending_analisis'] = None
+            st.error('No hay filas con texto en la columna elegida.')
+            return
+        pintar(8, 'Agrupando notas iguales o similares…')
+        grupos, mapa = construir_grupos(filas, cfg['umbral_titulo'], cfg['umbral_cuerpo'])
+        pintar(12, 'Analizando con IA…')
+        etiquetas, bitacora = etiquetar_todo(cfg, grupos, prog, tam_lote=cfg['tam_lote'],
+                                            max_reparaciones=cfg['max_rep'], votos=cfg['votos'])
+        corregidos = aplicar_guarda_tono(grupos, etiquetas, cfg['entidad'], cfg['alias'])
+        pintar(82, 'Generando la lista de Temas a partir del archivo…')
+        tax = proponer_taxonomia(cfg, grupos, etiquetas, objetivo=cfg['cubos_objetivo'],
+                                 progreso=lambda m: pintar(84, m))
+        pintar(88, 'Asignando Temas…')
+        temas, pendientes, origen = asignar_temas(cfg, grupos, etiquetas, tax, True)
+        canonizar_nuevos(temas, tax)
+        for _r in range(2):                  # lo que no case se resuelve por API según el texto
+            faltan = [q for q in pendientes if q['grupo'] not in temas]
+            if not faltan:
+                break
+            elegidos = elegir_cubo(cfg, faltan, tax, True)
+            for q in faltan:
+                if elegidos.get(q['grupo']):
+                    temas[q['grupo']] = elegidos[q['grupo']]
+                    origen[q['grupo']] = 'llm'
+        for g in grupos:                     # último recurso determinista: nunca queda vacío
+            if not temas.get(g['grupo']):
+                temas[g['grupo']] = cubo_de_respaldo(
+                    etiquetas.get(g['grupo'], {}).get('sub_tema', ''), g['titulo'])
+                origen[g['grupo']] = 'respaldo'
+        pintar(95, 'Generando el archivo de resultado…')
+        out = construir_xlsx(cfg, hdr, filas, grupos, mapa, etiquetas, temas, bitacora)
+        pintar(100, 'Listo')
+    except Exception as e:
+        st.session_state['pending_analisis'] = None
+        st.error('Se interrumpió el análisis: %s' % str(e)[:400])
+        st.info('Revisa la API key, el modelo o baja «Grupos por llamada» en los ajustes finos.')
+        return
+
+    st.session_state['res'] = {'cfg': cfg, 'header': hdr, 'filas': filas, 'grupos': grupos,
+                               'mapa': mapa, 'etiquetas': etiquetas, 'temas': temas,
+                               'bitacora': bitacora, 'tax': tax, 'origen': origen}
+    st.session_state['salida'] = out.getvalue()
+    st.session_state['salida_nombre'] = 'Menciones_%s_Tono_Tema_Subtemas.xlsx' % (
+        re.sub(r'[^A-Za-z0-9]+', '_', cfg['entidad'])[:40].strip('_') or 'cliente')
+    st.session_state['metricas'] = {'total': len(filas), 'grupos': len(grupos),
+                                    'temas': len(set(temas.values())),
+                                    'tiempo': _fmt_elapsed(time.time() - t0)}
+    st.session_state['avisos'] = {
+        'guarda': len(corregidos), 'saltadas': saltadas,
+        'sin_tono': len([g for g in grupos if not etiquetas.get(g['grupo'], {}).get('tono')]),
+        'respaldo': len([1 for g in grupos if origen.get(g['grupo']) == 'respaldo'])}
+    st.session_state['analisis_completo'] = True
+    st.session_state['pending_analisis'] = None
+
+
+def main():
+    st.set_page_config(page_title='Tono, Tema y Sub-tema de Menciones', page_icon='◈',
+                       layout='wide', initial_sidebar_state='collapsed')
+    load_custom_css()
+    render_theme_toggle()
+    exigir_password()
+    aviso_sin_password()
+
+    st.markdown("""
+    <div class="app-header">
+        <div class="app-header-icon">◈</div>
+        <div class="app-header-text">
+            <div class="app-header-title">Tono, Tema y Sub-tema de Menciones</div>
+            <div class="app-header-version">v1.0 · Sub-tema primero, tono después · Tema por reglas + IA · Realizado por Johnathan Cortés</div>
+        </div>
+        <div class="app-header-badge">Clasificador + IA</div>
+    </div>""", unsafe_allow_html=True)
+
+    if st.session_state.get('pending_analisis'):
+        run_analysis()
+        st.rerun()
+
+    if not st.session_state.get('analisis_completo'):
+        with st.form('main_form'):
+            st.markdown('<div class="sec-label">1. Sube el archivo de entrada</div>',
+                        unsafe_allow_html=True)
+            st.markdown("""
+            <div class="upload-zone">
+                <div class="upload-zone-card">
+                    <div class="upload-zone-icon uz-dossier">📋</div>
+                    <div class="upload-zone-text">
+                        <div class="upload-zone-title">Export de monitoreo de medios</div>
+                        <div class="upload-zone-desc">Sube el .xlsx del período. Luego eliges las columnas de título y de texto.</div>
+                    </div>
+                </div>
+            </div>""", unsafe_allow_html=True)
+            archivo = st.file_uploader('XLSX', type=['xlsx', 'xlsm'], label_visibility='collapsed')
+
+            if not archivo:
+                st.info('Sube el archivo del período para habilitar el análisis.')
+            else:
+                datos = archivo.getvalue()
+                wb = load_workbook(io.BytesIO(datos), read_only=True)
+                hojas = wb.sheetnames
+                wb2 = load_workbook(io.BytesIO(datos), read_only=True, data_only=True)
+                hoja = st.selectbox('Hoja', hojas)
+                header = [ctrl(h) for h in next(wb2[hoja].iter_rows(values_only=True))]
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    col_titulo = st.selectbox('Columna de título', header,
+                                              index=detectar(header, CAND_TITULO) or 0)
+                with c2:
+                    col_texto = st.selectbox('Columna de texto completo', header,
+                                             index=detectar(header, CAND_TEXTO) or 0)
+                with c3:
+                    i_id = detectar(header, CAND_ID)
+                    col_id = st.selectbox('Columna de id', ['(usar número de fila)'] + list(header),
+                                          index=(i_id + 1) if i_id is not None else 0)
+                extras = st.multiselect('Columnas extra a conservar en la hoja de grupos', header,
+                                        [h for h in ('Medio', 'Fecha', 'Tipo de Medio') if h in header])
+
+            st.markdown('<div class="sec-label">2. Cliente y criterio del análisis</div>',
+                        unsafe_allow_html=True)
+            _sec = leer_secrets()
+            c_brand, c_alias = st.columns(2)
+            with c_brand:
+                entidad = st.text_input('Entidad, marca o persona*',
+                                        placeholder='Ej: Universidad Simón Bolívar, Fenavi, Alcaldía de Sincelejo',
+                                        help='El tono se mide solo sobre esta entidad, sus voceros y sus alias.')
+            with c_alias:
+                alias = st.text_input('Alias o formas de nombrarla (coma o punto y coma)',
+                                      placeholder='Ej: Unisimón; la universidad; la alma mater',
+                                      help='Variantes del nombre que deben atribuirse al cliente.')
+            c_crit, c_voc = st.columns([3, 2])
+            with c_crit:
+                criterio = st.radio('Criterio del tono', list(CRITERIOS_TONO.keys()), index=0,
+                                    help='Aspectual estricto: solo la crítica dirigida a la entidad es '
+                                         'Negativo (gobiernos, alcaldías, universidades, entidades '
+                                         'públicas). Favorabilidad del sector: cuenta cómo queda el '
+                                         'sector aunque la marca no sea el actor (gremios, cámaras).')
+            with c_voc:
+                voceros = st.text_input('Vocero(s) de la entidad (opcional)',
+                                        placeholder='Ej: Gonzalo Moreno; el rector',
+                                        help='Personas cuyo nombre se atribuye a la entidad para el tono.')
+
+            st.markdown('<div class="sec-label">3. Modelo</div>', unsafe_allow_html=True)
+            _prov = _sec.get('proveedor') if _sec.get('proveedor') in PROVEEDORES else list(PROVEEDORES)[0]
+            cp, cm = st.columns(2)
+            with cp:
+                proveedor = st.selectbox('Proveedor', list(PROVEEDORES.keys()),
+                                         index=list(PROVEEDORES).index(_prov))
+            base_def, modelo_def = PROVEEDORES[proveedor]
+            with cm:
+                modelo = st.text_input('Modelo', _sec.get('modelo') or modelo_def)
+            base_url = st.text_input('base_url', _sec.get('base_url') or base_def)
+            clave_secrets = _sec.get('api_key', '')
+            if clave_secrets:
+                api_key = clave_secrets
+                st.caption('🔒 API key cargada desde los Secrets. No se muestra ni se envía al navegador.')
+                with st.expander('Usar otra API key solo en esta sesión'):
+                    tmp = st.text_input('API key temporal', value='', type='password',
+                                        help='No se guarda: vive solo en esta pestaña del navegador.')
+                    if tmp.strip():
+                        api_key = tmp.strip()
+                        st.caption('Usando la key temporal de esta sesión.')
+            else:
+                api_key = st.text_input('API key', value='', type='password',
+                                        help='No está en los Secrets: se escribe aquí y vive solo en '
+                                             'esta sesión. Recomendado: guárdala en los Secrets.')
+
+            with st.expander('⚙ Ajustes finos del análisis (opcional)'):
+                ca, cb, cc, cd = st.columns(4)
+                with ca:
+                    tam_lote = st.slider('Grupos por llamada', 5, 30, 10, 1,
+                                         help='Con gpt-4.1-nano 10 funciona mejor.')
+                with cb:
+                    votos = st.slider('Verificaciones del tono por grupo', 1, 3, 2, 1,
+                                      help='Cada grupo se etiqueta N veces y gana la mayoría; un empate '
+                                           'cae a Neutro.')
+                with cc:
+                    umbral_titulo = st.slider('Similitud de titulares (%)', 75, 100,
+                                              UMBRAL_TITULO_POR_DEFECTO, 1)
+                with cd:
+                    umbral_cuerpo = st.slider('Similitud de cuerpos (%)', 70, 100,
+                                              UMBRAL_CUERPO_POR_DEFECTO, 1)
+                ce, cf = st.columns(2)
+                with ce:
+                    cubos_objetivo = st.slider('Cubos objetivo de la lista de Temas', 8, 25, 16, 1,
+                                               help='La lista se genera leyendo los hechos de este '
+                                                    'archivo; este es el tamaño buscado.')
+                with cf:
+                    max_rep = st.slider('Máximo de reparaciones por lote', 0, 3, 2, 1)
+
+            if st.form_submit_button('▶ Iniciar análisis', use_container_width=True, type='primary'):
+                if not archivo:
+                    st.error('Sube el archivo Excel del período.')
+                elif not entidad.strip():
+                    st.error('Indica la entidad, marca o persona: el tono se mide solo sobre ella.')
+                elif not api_key.strip():
+                    st.error('Falta la API key (en los Secrets o en «Usar otra API key solo en esta sesión»).')
+                else:
+                    st.session_state['pending_analisis'] = {
+                        'datos': datos, 'nombre': archivo.name, 'hoja': hoja,
+                        'col_titulo': idx_of(header, col_titulo), 'col_texto': idx_of(header, col_texto),
+                        'col_id': None if str(col_id).startswith('(') else idx_of(header, col_id),
+                        'extras': [idx_of(header, e) for e in extras],
+                        'cfg': {'entidad': entidad.strip(),
+                                'voceros': [v.strip() for v in re.split(r'[,;]', voceros) if v.strip()],
+                                'alias': [a.strip() for a in re.split(r'[,\n;]', alias) if a.strip()],
+                                'criterio': criterio, 'proveedor': proveedor,
+                                'base_url': base_url.strip(), 'modelo': modelo.strip(),
+                                'api_key': api_key.strip(), 'timeout': 120,
+                                'tam_lote': int(tam_lote), 'votos': int(votos),
+                                'umbral_titulo': int(umbral_titulo), 'umbral_cuerpo': int(umbral_cuerpo),
+                                'cubos_objetivo': int(cubos_objetivo), 'max_rep': int(max_rep)}}
+                    st.rerun()
+    else:
+        met = st.session_state.get('metricas') or {}
+        av = st.session_state.get('avisos') or {}
+        st.markdown("""
+        <div class="success-banner"><div class="success-icon">✓</div>
+        <div><div class="success-title">Análisis completado</div>
+        <div class="success-sub">El archivo con Tono, Tema y Sub-tema por mención está listo para descargar</div></div></div>""",
+                    unsafe_allow_html=True)
+        avisos = []
+        if av.get('guarda'):
+            avisos.append('guarda del tono: %d Negativos sin señalamiento pasaron a Neutro'
+                          % av['guarda'])
+        if av.get('respaldo'):
+            avisos.append('%d Temas asignados por respaldo determinista' % av['respaldo'])
+        if av.get('sin_tono'):
+            avisos.append('⚠️ %d grupos sin tono (revisa la API key o el modelo)' % av['sin_tono'])
+        if avisos:
+            st.info(' · '.join(avisos))
+        st.markdown(f"""
+        <div class="metrics-grid">
+          <div class="metric-card m-total"><div class="metric-val" style="color:var(--text)">{met.get('total', 0)}</div><div class="metric-lbl">Total Registros</div></div>
+          <div class="metric-card m-unique"><div class="metric-val" style="color:var(--green)">{met.get('grupos', 0)}</div><div class="metric-lbl">Hechos Únicos</div></div>
+          <div class="metric-card m-dup"><div class="metric-val" style="color:var(--amber)">{met.get('temas', 0)}</div><div class="metric-lbl">Temas</div></div>
+          <div class="metric-card m-time"><div class="metric-val" style="color:var(--blue)">{met.get('tiempo', '')}</div><div class="metric-lbl">Tiempo de Ejecución</div></div>
+        </div>""", unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+        c1.download_button('⬇ Descargar Xlsx con Tono, Tema y Sub-tema',
+                           data=st.session_state['salida'],
+                           file_name=st.session_state['salida_nombre'],
+                           mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                           use_container_width=True, type='primary')
+        if c2.button('Nuevo análisis', use_container_width=True):
+            ok, tema = st.session_state.get('_auth_ok'), st.session_state.get('ui_theme')
+            st.session_state.clear()
+            st.session_state['_auth_ok'] = ok
+            if tema in ('dark', 'light'):
+                st.session_state['ui_theme'] = tema
+            st.rerun()
+
+    st.markdown('<div class="footer">Tono, Tema y Sub-tema · Johnathan Cortés ©</div>',
+                unsafe_allow_html=True)
+
 
 if __name__ == '__main__':
     main()

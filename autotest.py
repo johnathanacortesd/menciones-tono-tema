@@ -276,6 +276,35 @@ def main():
           'cubo_de_respaldo' in src and "origen[q['grupo']] = 'llm'" in src)
     check('el clasificador de cubos recibe el texto de la nota', 'TEXTO: %s' in src)
 
+    print('\n11. nombres globales sin definir (NameError latente, p. ej. una constante que no se copió)')
+    import symtable
+    import builtins as _bi
+
+    def _sin_definir(src):
+        raiz = symtable.symtable(src, 'app.py', 'exec')
+        definidos = {x.get_name() for x in raiz.get_symbols()}
+        ignorar = {'__name__', '__file__', '__doc__', '__builtins__'}
+        malos = set()
+
+        def visitar(tab):
+            for x in tab.get_symbols():
+                if (x.is_global() and x.is_referenced() and not x.is_assigned()
+                        and x.get_name() not in definidos and x.get_name() not in ignorar
+                        and not hasattr(_bi, x.get_name())):
+                    malos.add(x.get_name())
+            for h in tab.get_children():
+                visitar(h)
+
+        visitar(raiz)
+        return sorted(malos)
+
+    _src = open('app.py', encoding='utf-8').read()
+    check('no hay nombres globales sin definir', not _sin_definir(_src), str(_sin_definir(_src)))
+    # la prueba sirve: detecta una constante borrada a propósito
+    _roto = _src.replace('THEME_LIGHT_VARS = """', 'THEME_LIGHT_VARS_BORRADA = """', 1)
+    check('la prueba detecta una constante que falta', 'THEME_LIGHT_VARS' in _sin_definir(_roto),
+          str(_sin_definir(_roto)))
+
     print('\n7. reglas que no pueden desaparecer')
     for nombre, txt in app.CRITERIOS_TONO.items():
         check('el criterio "%s" aclara que el tema no decide el tono' % nombre[:22],
