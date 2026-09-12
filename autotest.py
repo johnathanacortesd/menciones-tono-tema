@@ -326,6 +326,54 @@ def main():
     else:
         print('  (sin git: se omite)')
 
+    print('\n13. tono focalizado en la entidad y guardas nuevas')
+    src = open('app.py', encoding='utf-8').read()
+    check('el prompt separa lo que decide el tono de lo que no',
+          'LO QUE SE DICE DE LA ENTIDAD' in src and 'NO decide el tono' in src)
+    check('el prompt del sistema lo instruye explícitamente',
+          'se juzga SOLO con los pasajes que hablan de la entidad' in src)
+    check('las cuatro guardas están definidas y cableadas',
+          all(k in src for k in ('def aplicar_guarda_mencion', 'def aplicar_guarda_tono',
+                                 'def aplicar_guarda_actor', 'def aplicar_regla_autor',
+                                 'sin_mencion = aplicar_guarda_mencion', 'por_autor = aplicar_regla_autor')))
+    check('alias y voceros se separan también por punto y coma',
+          "re.split(r'[,;\\n]', voceros)" in src and "re.split(r'[,;\\n]', alias)" in src)
+    check('detecta la columna del autor para la regla de vocero',
+          'CAND_AUTOR' in src and "col_autor = detectar(header, CAND_AUTOR)" in src)
+    _pas = app._pasajes_entidad('Relleno sin marca. La Universidad Simón Bolívar fue escogida como sede '
+                                'del congreso. Texto irrelevante para el tono.',
+                                'Titular', 'Universidad Simón Bolívar', ['Unisimón'])
+    check('los pasajes solo traen lo que menciona a la entidad',
+          'escogida' in _pas and 'Relleno' not in _pas, _pas[:60])
+    check('sin mención no hay pasajes', app._pasajes_entidad('Nota de otro tema.', 'T', 'Uni X', []) == '')
+    _g = [{'grupo': 1, 'titulo': 'Congresista presenta proyecto de paz barrial',
+           'texto': 'El representante presentó el proyecto. No menciona al cliente.', 'autores': []}]
+    _e = {1: {'tono': 'Positivo', 'sub_tema': 'Proyecto de paz barrial'}}
+    app.aplicar_guarda_mencion(_g, _e, 'Universidad Simón Bolívar', ['Unisimón'])
+    check('la guarda de mención baja a Neutro lo que no menciona a la entidad',
+          _e[1]['tono'] == 'Neutro')
+    _g2 = [{'grupo': 1, 'titulo': 'El simposio se realizará en el salón de la Universidad Simón Bolívar',
+            'texto': 'El simposio científico se realizará en el Salón Jorge Artel de la Universidad '
+                     'Simón Bolívar con expertos de la región.', 'autores': []}]
+    _e2 = {1: {'tono': 'Positivo', 'sub_tema': 'Simposio científico'}}
+    app.aplicar_guarda_actor(_g2, _e2, 'Universidad Simón Bolívar', ['Unisimón'], [],
+                             'Aspectual estricto (recomendado)')
+    check('la guarda de actor distingue dirección de actor (baja la sede ajena)',
+          _e2[1]['tono'] == 'Neutro')
+    _g3 = [{'grupo': 1, 'titulo': 'Unisimón fue escogida como sede de la asamblea',
+            'texto': 'La Universidad Simón Bolívar fue escogida como sede de la asamblea internacional.',
+            'autores': []}]
+    _e3 = {1: {'tono': 'Neutro', 'sub_tema': 'Sede de asamblea internacional'}}
+    app.aplicar_guarda_actor(_g3, _e3, 'Universidad Simón Bolívar', ['Unisimón'], [],
+                             'Aspectual estricto (recomendado)')
+    check('y sube a Positivo cuando la entidad es la sede escogida', _e3[1]['tono'] == 'Positivo')
+    _g4 = [{'grupo': 1, 'titulo': 'LA IA Y LA RECONVERSIÓN LABORAL', 'texto': 'Columna.',
+            'autores': ['José Consuegra']}]
+    _e4 = {1: {'tono': 'Neutro', 'sub_tema': 'Reconversión laboral'}}
+    app.aplicar_regla_autor(_g4, _e4, ['José Consuegra'])
+    check('la regla de autor sube a Positivo la nota firmada por el vocero',
+          _e4[1]['tono'] == 'Positivo')
+
     print('\n7. reglas que no pueden desaparecer')
     for nombre, txt in app.CRITERIOS_TONO.items():
         check('el criterio "%s" aclara que el tema no decide el tono' % nombre[:22],
