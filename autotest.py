@@ -12,6 +12,7 @@ Verifica las piezas que hacen la diferencia frente a un prompt suelto:
 """
 import io
 import json
+import os
 import re
 import sys
 import collections
